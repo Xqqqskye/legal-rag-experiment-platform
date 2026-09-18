@@ -1,0 +1,11 @@
+{
+  "status": "measured_historical_artifact",
+  "note": "来自原项目已有 RAGAS 结果文件，不是 Mock 生成。",
+  "experiments": [
+    {"name": "BM25", "top_k": 10, "context_recall": 0.4204, "context_precision": 0.4181, "source": "data/experiments/exp2/rag/ragas_bm25_topk10.json"},
+    {"name": "BGE-large", "top_k": 10, "context_recall": 0.5613, "context_precision": 0.7226, "source": "data/experiments/exp2/rag/ragas_bge_large_topk10.json"},
+    {"name": "RRF", "top_k": 20, "context_recall": 0.6667, "context_precision": 0.5516, "source": "data/experiments/exp2/rag/ragas_rrf_bm25_bge_large_topk20_bm10_bg10.json"},
+    {"name": "RRF + BGE-reranker-large", "top_k": 10, "context_recall": 0.6042, "context_precision": 0.7593, "source": "data/experiments/exp2/rag/ragas_rrf_bm25_bge_large_rerank_bge-reranker-large_topk10_bm10_bg10_rrf20.json"}
+  ]
+}
+

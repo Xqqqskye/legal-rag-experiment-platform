@@ -1,0 +1,9 @@
+# Install a CUDA-compatible PyTorch wheel separately before this file.
+transformers>=5.2
+datasets>=3.0
+accelerate>=1.0
+peft>=0.18
+trl>=0.24
+bitsandbytes>=0.45
+llamafactory>=0.9
+

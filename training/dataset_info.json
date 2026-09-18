@@ -1,0 +1,5 @@
+{
+  "legal_sft_v2_train": {"file_name": "legal_sft_v2_train.json"},
+  "legal_sft_v2_val": {"file_name": "legal_sft_v2_val.json"}
+}
+

@@ -1,0 +1,2 @@
+"""LegalRAG Lab application package."""
+

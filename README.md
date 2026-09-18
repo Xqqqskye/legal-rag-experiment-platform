@@ -148,10 +148,6 @@ artifacts/              标明来源的历史实验快照
 docs/                   评测、模型与发布安全说明
 ```
 
-## 哪些内容不能上传
-
-API 接入代码和空白配置模板可以公开；密钥、令牌、私有端点和调用数据不能公开。完整清单见 [GitHub 发布与敏感信息清单](docs/GITHUB_PUBLISHING.md)。仓库的 `.gitignore` 已默认排除 `.env`、模型权重、缓存、私有数据、SQLite 实验库和 Elasticsearch 数据卷，但推送前仍必须做人工复核。
-
 ## 测试
 
 ```bash

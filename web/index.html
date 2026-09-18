@@ -1,0 +1,1398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>法律智能问答 · 全链路 RAG DEMO</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --border: #e5e7eb;
+    --text: #1f2329;
+    --text-2: #646a73;
+    --primary: #2563eb;
+    --primary-soft: #eff6ff;
+    --legal: #2563eb;
+    --illegal: #dc2626;
+    --chat: #059669;
+    --ok: #16a34a;
+    --bad: #dc2626;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: "Microsoft YaHei", "PingFang SC", system-ui, sans-serif; line-height: 1.6; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 24px 20px 60px; }
+  header h1 { font-size: 24px; font-weight: 700; }
+  header p { color: var(--text-2); margin-top: 4px; font-size: 14px; }
+
+  /* pipeline */
+  .pipeline { display: flex; align-items: stretch; gap: 8px; margin: 20px 0 28px; flex-wrap: wrap; }
+  .pnode { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 16px; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+  .pnode small { display: block; font-weight: 400; color: var(--text-2); font-size: 12px; }
+  .parrow { align-self: center; color: var(--text-2); font-size: 18px; }
+  .pnode.hl { border-color: var(--primary); background: var(--primary-soft); }
+
+  /* tabs */
+  .tabs { display: flex; gap: 6px; border-bottom: 2px solid var(--border); margin-bottom: 20px; flex-wrap: wrap; }
+  .tab { padding: 10px 18px; cursor: pointer; font-size: 15px; color: var(--text-2); border: none; background: none; border-bottom: 3px solid transparent; margin-bottom: -2px; font-family: inherit; }
+  .tab.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 700; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .layout { display: grid; grid-template-columns: 340px 1fr; gap: 16px; }
+  @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+  .sample-list { max-height: 560px; overflow-y: auto; }
+  .sample-item { padding: 10px 12px; border-radius: 8px; cursor: pointer; font-size: 13.5px; border: 1px solid transparent; margin-bottom: 6px; background: #fafbfc; border-color: var(--border); }
+  .sample-item:hover { border-color: var(--primary); }
+  .sample-item.sel { border-color: var(--primary); background: var(--primary-soft); }
+  .sample-item .q { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+  .badge { display: inline-block; padding: 1px 10px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #fff; }
+  .b-legal { background: var(--legal); }
+  .b-illegal { background: var(--illegal); }
+  .b-chat { background: var(--chat); }
+  .b-unk { background: #9ca3af; }
+  .mark-ok { color: var(--ok); font-weight: 700; }
+  .mark-bad { color: var(--bad); font-weight: 700; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--border); text-align: left; }
+  th { background: #f3f4f6; font-weight: 600; font-size: 13px; }
+  td.num { font-variant-numeric: tabular-nums; }
+
+  .qbox { background: #fafbfc; border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; font-size: 15px; margin-bottom: 14px; }
+  .qbox .lbl { font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+
+  .rewrite-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 10px; }
+  .rewrite-card .mname { font-size: 12.5px; font-weight: 700; color: var(--primary); margin-bottom: 4px; }
+  .rewrite-card .rtext { font-size: 14.5px; }
+  .rewrite-empty { color: var(--text-2); font-style: italic; font-size: 13.5px; }
+
+  /* charts */
+  .chart { margin-top: 8px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; font-size: 13.5px; }
+  .bar-row .blabel { width: 130px; text-align: right; color: var(--text-2); flex-shrink: 0; }
+  .bar-track { flex: 1; background: #eef0f3; border-radius: 6px; height: 22px; position: relative; }
+  .bar-fill { height: 100%; border-radius: 6px; background: var(--primary); transition: width .5s; }
+  .bar-fill.f2 { background: #7c3aed; }
+  .bar-val { width: 66px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+  .chart-title { font-weight: 700; margin: 18px 0 10px; font-size: 15px; }
+  .note { font-size: 12.5px; color: var(--text-2); margin-top: 8px; }
+  .legend { display: flex; gap: 18px; font-size: 13px; color: var(--text-2); margin-top: 4px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+  h3.sec { font-size: 16px; margin-bottom: 12px; }
+  .footer { margin-top: 30px; color: var(--text-2); font-size: 12.5px; text-align: center; }
+  .playground { margin: 20px 0 18px; padding: 20px; border-radius: 16px; background: linear-gradient(135deg, #172554 0%, #1e3a8a 56%, #0f766e 100%); color: #fff; box-shadow: 0 16px 40px rgba(30, 58, 138, .18); }
+  .playground h2 { font-size: 18px; margin-bottom: 4px; }
+  .playground .sub { color: #dbeafe; font-size: 13px; margin-bottom: 14px; }
+  .ask-row { display: grid; grid-template-columns: 1fr 112px; gap: 10px; align-items: stretch; }
+  .ask-input, .model-select { width: 100%; border: 1px solid rgba(255,255,255,.3); border-radius: 10px; background: rgba(255,255,255,.96); color: var(--text); font: inherit; }
+  .ask-input { min-height: 82px; resize: vertical; padding: 12px 14px; font-size: 16px; line-height: 1.55; }
+  .model-select { padding: 0 12px; font-size: 14px; }
+  .model-config { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-top: 12px; }
+  .model-choice { display: grid; gap: 5px; padding: 10px 11px; border: 1px solid rgba(255,255,255,.24); border-radius: 10px; background: rgba(15,23,42,.2); }
+  .model-choice span { font-size: 14px; font-weight: 700; color: #fff; }
+  .model-choice small { min-height: 36px; color: #bfdbfe; font-size: 12px; line-height: 1.45; }
+  .model-choice select { min-height: 38px; padding: 6px 9px; border: 1px solid rgba(255,255,255,.3); border-radius: 8px; background: rgba(255,255,255,.97); color: var(--text); font: inherit; font-size: 14px; }
+  .run-btn { border: 0; border-radius: 10px; background: #fbbf24; color: #422006; font: inherit; font-weight: 800; cursor: pointer; transition: transform .15s, background .15s; }
+  .run-btn:hover { background: #fcd34d; transform: translateY(-1px); }
+  .run-btn:disabled { cursor: wait; opacity: .72; transform: none; }
+  .run-btn:focus-visible, .ask-input:focus-visible, .model-select:focus-visible, .model-choice select:focus-visible, .example-chip:focus-visible, .tab:focus-visible { outline: 3px solid #fbbf24; outline-offset: 2px; }
+  .examples { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 11px; }
+  .example-chip { border: 1px solid rgba(255,255,255,.35); background: rgba(255,255,255,.1); color: #fff; border-radius: 999px; padding: 5px 10px; cursor: pointer; font: inherit; font-size: 12px; }
+  .example-chip:hover { background: rgba(255,255,255,.2); }
+  .live-result { display: none; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 14px; }
+  .live-result.show { display: grid; }
+  .stage-card { min-height: 112px; padding: 13px; background: rgba(255,255,255,.97); color: var(--text); border-radius: 11px; }
+  .stage-card .stage { color: var(--text-2); font-size: 12px; margin-bottom: 7px; }
+  .stage-card strong { display: block; font-size: 15px; }
+  .stage-card p { font-size: 13px; margin-top: 6px; color: var(--text-2); }
+  .latency { margin-top: 9px; font-size: 12px; color: #bfdbfe; }
+  @media (max-width: 760px) {
+    .ask-row { grid-template-columns: 1fr; }
+    .model-config { grid-template-columns: 1fr; }
+    .model-select, .run-btn { min-height: 44px; }
+    .live-result { grid-template-columns: 1fr; }
+  }
+  .config-row { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 11px; font-size: 13px; color: #dbeafe; }
+  .config-row label { display: flex; gap: 7px; align-items: center; }
+  .config-row select { border: 1px solid rgba(255,255,255,.3); border-radius: 7px; padding: 5px 8px; background: rgba(255,255,255,.96); color: var(--text); }
+  .service-status { display: inline-flex; align-items: center; gap: 7px; margin-top: 12px; padding: 5px 10px; border-radius: 999px; background: rgba(15,23,42,.28); color: #dbeafe; font-size: 12px; }
+  .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 3px rgba(245,158,11,.18); }
+  .service-status.ready .status-dot { background: #4ade80; box-shadow: 0 0 0 3px rgba(74,222,128,.18); }
+  .service-status.error .status-dot { background: #f87171; box-shadow: 0 0 0 3px rgba(248,113,113,.18); }
+  .chain-steps { display: grid; grid-template-columns: repeat(9, 1fr); gap: 7px; margin: 16px 0; }
+  .chain-step { position: relative; padding: 10px 8px; background: #fff; border: 1px solid var(--border); border-radius: 9px; font-size: 12px; color: var(--text-2); text-align: center; }
+  .chain-step.done { border-color: #60a5fa; background: #eff6ff; color: #1d4ed8; font-weight: 700; }
+  .chain-step::after { content: "›"; position: absolute; right: -7px; top: 7px; color: #94a3b8; font-size: 18px; z-index: 1; }
+  .chain-step:last-child::after { display: none; }
+  .chain-panel { display: none; margin: 0 0 26px; }
+  .chain-panel.show { display: block; }
+  .chain-summary { display: grid; grid-template-columns: 150px 1fr 220px; gap: 12px; align-items: stretch; }
+  .summary-cell { background: #fff; border: 1px solid var(--border); border-radius: 11px; padding: 13px 14px; }
+  .summary-cell .eyebrow, .flow-section .eyebrow { color: var(--text-2); font-size: 12px; margin-bottom: 5px; }
+  .summary-cell .main { font-size: 14px; font-weight: 650; }
+  .flow-section { background: #fff; border: 1px solid var(--border); border-radius: 13px; padding: 16px; margin-top: 12px; }
+  .flow-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 12px; }
+  .flow-head h3 { font-size: 16px; }
+  .flow-head p { color: var(--text-2); font-size: 12px; }
+  .retrieval-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .retrieval-col { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .retrieval-col h4 { padding: 10px 12px; background: #f8fafc; font-size: 14px; border-bottom: 1px solid var(--border); }
+  .retrieval-scroll { max-height: 820px; overflow-y: auto; scrollbar-gutter: stable; }
+  .law-hit { display: grid; grid-template-columns: 30px 1fr; gap: 7px; padding: 9px 11px; border-bottom: 1px solid #eef0f3; font-size: 13px; }
+  .law-hit:last-child { border-bottom: 0; }
+  .rank { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 6px; background: #eef2ff; color: #4338ca; font-weight: 800; font-size: 12px; }
+  .law-text { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.55; }
+  .method-tag { display: inline-block; border-radius: 999px; padding: 2px 8px; background: #eef2ff; color: #4338ca; font-size: 11px; margin-left: 6px; }
+  .fusion-list, .rerank-list { display: grid; gap: 8px; }
+  .fusion-item { display: grid; grid-template-columns: 42px 1fr 120px; gap: 10px; align-items: center; border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; font-size: 13px; }
+  .score { font-variant-numeric: tabular-nums; color: var(--text-2); text-align: right; }
+  .rerank-item { border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; }
+  .rerank-meta { display: flex; align-items: center; gap: 9px; margin-bottom: 7px; font-size: 12px; }
+  .score-track { flex: 1; height: 7px; border-radius: 99px; background: #eef0f3; overflow: hidden; }
+  .score-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #0d9488); }
+  .selected-tag { background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 999px; font-weight: 700; }
+  .context-box { background: #f8fafc; border: 1px solid #dbe3ec; border-radius: 10px; padding: 12px; font-size: 13px; white-space: pre-wrap; max-height: 260px; overflow: auto; }
+  .answer-box { border-left: 4px solid #0d9488; background: #f0fdfa; border-radius: 0 10px 10px 0; padding: 15px 16px; font-size: 14px; white-space: pre-line; }
+  .answer-warning { margin-top: 10px; padding: 9px 11px; border-radius: 8px; background: #fffbeb; color: #92400e; font-size: 12px; }
+  .evaluation-head { display: grid; grid-template-columns: 140px 1fr; gap: 16px; align-items: center; margin-bottom: 14px; }
+  .overall-score { min-height: 116px; display: grid; place-items: center; align-content: center; border-radius: 12px; color: #fff; background: linear-gradient(145deg, #1d4ed8, #0f766e); }
+  .overall-score strong { font-size: 34px; line-height: 1; }
+  .overall-score span { font-size: 12px; color: #dbeafe; margin-top: 7px; }
+  .metric-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px 14px; }
+  .metric-row { display: grid; grid-template-columns: 92px 1fr 38px; gap: 8px; align-items: center; font-size: 12px; }
+  .metric-track { height: 8px; background: #e5e7eb; border-radius: 99px; overflow: hidden; }
+  .metric-fill { height: 100%; background: linear-gradient(90deg, #2563eb, #14b8a6); border-radius: inherit; }
+  .issue-list { display: grid; gap: 7px; margin-top: 10px; }
+  .issue-item { padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; background: #fafbfc; font-size: 13px; }
+  .issue-item strong { color: #b45309; margin-right: 7px; }
+  .recommend-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .recommend-card { padding: 12px; border-radius: 10px; background: #f8fafc; border: 1px solid var(--border); }
+  .recommend-card strong { font-size: 13px; }
+  .recommend-card p { color: var(--text-2); font-size: 12px; margin-top: 5px; }
+  .mode-switch { display: flex; gap: 8px; margin-top: 18px; }
+  .mode-btn { border: 1px solid var(--border); border-radius: 9px; background: #fff; color: var(--text-2); padding: 8px 16px; font: inherit; font-size: 14px; cursor: pointer; }
+  .mode-btn.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); font-weight: 800; }
+  .mode-view.hidden { display: none; }
+  .experiment-shell { margin-top: 18px; }
+  .experiment-intro { margin-bottom: 14px; color: var(--text-2); font-size: 14px; }
+  .compare-question { width: 100%; min-height: 78px; resize: vertical; padding: 11px 13px; border: 1px solid var(--border); border-radius: 10px; font: inherit; font-size: 16px; }
+  .compare-configs, .compare-answer-grid, .badcase-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 13px; }
+  .pipeline-config { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: #f8fafc; }
+  .pipeline-config h3 { font-size: 16px; margin-bottom: 10px; }
+  .pipeline-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .pipeline-fields label { display: grid; gap: 4px; color: var(--text-2); font-size: 12px; }
+  .pipeline-fields select { min-height: 38px; border: 1px solid var(--border); border-radius: 8px; background: #fff; padding: 6px 8px; color: var(--text); font: inherit; font-size: 13px; }
+  .pipeline-checks { display: flex; gap: 15px; flex-wrap: wrap; margin-top: 10px; font-size: 13px; }
+  .compare-run { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-top: 14px; }
+  .compare-run button { min-height: 44px; padding: 0 22px; }
+  .compare-result { display: none; margin-top: 16px; }
+  .compare-result.show { display: block; }
+  .delta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 12px 0; }
+  .delta-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: #fff; }
+  .delta-card span { display: block; color: var(--text-2); font-size: 12px; }
+  .delta-card strong { font-size: 20px; }
+  .attribution { padding: 11px 13px; border-left: 4px solid var(--primary); background: var(--primary-soft); border-radius: 0 9px 9px 0; font-size: 14px; }
+  .badcase-box { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: #fff; }
+  .badcase-box h4 { margin-bottom: 7px; font-size: 14px; }
+  .badcase-box li { margin-left: 18px; margin-bottom: 5px; font-size: 13px; color: #92400e; }
+  .compare-answer { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: #fff; }
+  .compare-answer h4 { margin-bottom: 7px; }
+  .source-list { display: grid; gap: 6px; margin-top: 9px; }
+  .source-item { display: flex; justify-content: space-between; gap: 10px; align-items: center; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; font-size: 12px; }
+  .source-item a { color: var(--primary); overflow-wrap: anywhere; }
+  .trusted-tag { flex-shrink: 0; padding: 1px 7px; border-radius: 999px; background: #dcfce7; color: #166534; font-weight: 700; }
+  .source-main { min-width: 0; display: grid; gap: 2px; }
+  .source-detail { color: var(--muted); font-size: 11px; }
+  .batch-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(320px, .75fr); gap: 14px; margin-top: 14px; }
+  .batch-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+  .toolbar-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .secondary-btn { min-height: 38px; padding: 0 13px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+  .secondary-btn:hover { border-color: var(--primary); color: var(--primary); }
+  .secondary-btn:disabled { opacity: .55; cursor: wait; }
+  .case-list { max-height: 430px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+  .case-row { display: grid; grid-template-columns: 28px minmax(0, 1fr) 88px 46px; gap: 9px; align-items: start; padding: 10px 11px; border-bottom: 1px solid #edf0f3; font-size: 13px; }
+  .case-row:last-child { border-bottom: 0; }
+  .case-row:hover { background: #f8fafc; }
+  .case-row strong { display: block; line-height: 1.45; }
+  .case-meta { color: var(--text-2); font-size: 12px; margin-top: 4px; }
+  .difficulty { justify-self: end; padding: 2px 7px; border-radius: 999px; background: #eef2ff; color: #4338ca; font-size: 11px; font-weight: 700; }
+  .inline-form { display: grid; grid-template-columns: 2fr 1fr 1.3fr auto; gap: 8px; margin-top: 11px; }
+  .inline-form input, .batch-name { min-height: 40px; width: 100%; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 13px; }
+  .batch-configs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .batch-progress { display: none; margin-top: 14px; padding: 13px; border: 1px solid #bfdbfe; background: #eff6ff; border-radius: 10px; }
+  .batch-progress.show { display: block; }
+  .progress-track { height: 10px; overflow: hidden; background: #dbeafe; border-radius: 999px; margin: 8px 0; }
+  .progress-fill { height: 100%; width: 0; background: linear-gradient(90deg, #2563eb, #0d9488); transition: width .35s; }
+  .history-list { display: grid; gap: 8px; max-height: 510px; overflow: auto; }
+  .history-item { width: 100%; text-align: left; border: 1px solid var(--border); border-radius: 9px; background: #fff; padding: 10px 11px; cursor: pointer; font: inherit; }
+  .history-item:hover, .history-item.active { border-color: var(--primary); background: var(--primary-soft); }
+  .history-top { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; font-weight: 750; }
+  .status-pill { padding: 1px 7px; border-radius: 999px; background: #eef2ff; color: #4338ca; font-size: 11px; }
+  .batch-result { display: none; margin-top: 14px; }
+  .batch-result.show { display: block; }
+  .kpi-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 9px; margin: 12px 0; }
+  .kpi { border: 1px solid var(--border); border-radius: 9px; padding: 10px; background: #fff; }
+  .kpi span { display: block; color: var(--text-2); font-size: 11px; margin-bottom: 4px; }
+  .kpi strong { font-size: 18px; }
+  .case-result-table { max-height: 430px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+  .pass { color: var(--ok); font-weight: 800; }
+  .fail { color: var(--bad); font-weight: 800; }
+  .prompt-shell { display: grid; gap: 14px; }
+  .prompt-toolbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+  .prompt-stage-tabs { display: flex; gap: 7px; flex-wrap: wrap; margin-top: 14px; }
+  .prompt-stage-btn { border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--text-2); padding: 7px 12px; font: inherit; font-size: 13px; cursor: pointer; }
+  .prompt-stage-btn.active { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); font-weight: 800; }
+  .prompt-meta { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+  .prompt-meta > div { border: 1px solid var(--border); border-radius: 9px; padding: 9px 11px; background: #f8fafc; }
+  .prompt-meta span { display: block; color: var(--text-2); font-size: 11px; }
+  .prompt-meta strong { display: block; margin-top: 2px; font-size: 13px; }
+  .prompt-editors { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .prompt-editor { border: 1px solid var(--border); border-radius: 12px; padding: 13px; background: #f8fafc; }
+  .prompt-editor-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 8px; }
+  .prompt-editor-head h3 { font-size: 15px; }
+  .prompt-version { color: var(--text-2); font-size: 11px; }
+  .prompt-textarea { width: 100%; min-height: 430px; resize: vertical; border: 1px solid #cfd8e6; border-radius: 9px; background: #fff; padding: 12px; color: var(--text); font: 13px/1.65 "Cascadia Code", "Microsoft YaHei", monospace; }
+  .prompt-textarea:focus { outline: 3px solid rgba(36,87,214,.14); border-color: var(--primary); }
+  .prompt-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .prompt-actions-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  .prompt-save-state { color: var(--text-2); font-size: 12px; }
+  .answer-structured { display: grid; gap: 12px; }
+  .answer-lead { border-left: 4px solid var(--teal); background: #f0fdfa; border-radius: 0 10px 10px 0; padding: 14px 16px; }
+  .answer-section-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: #fff; }
+  .answer-section-card h4 { margin-bottom: 7px; font-size: 14px; }
+  .answer-section-card ol { padding-left: 21px; }
+  .answer-section-card li { margin: 5px 0; font-size: 14px; }
+  .citation-chip { display: inline-block; margin-left: 5px; border-radius: 5px; padding: 0 5px; background: #e8efff; color: #2457d6; font-size: 11px; font-weight: 800; }
+  @media (max-width: 860px) {
+    .chain-steps { grid-template-columns: repeat(2, 1fr); }
+    .chain-step::after { display: none; }
+    .chain-summary, .retrieval-grid, .recommend-grid, .evaluation-head, .metric-grid { grid-template-columns: 1fr; }
+    .compare-configs, .compare-answer-grid, .badcase-grid, .delta-grid, .pipeline-fields, .batch-layout, .batch-configs, .kpi-grid, .inline-form, .prompt-editors, .prompt-meta { grid-template-columns: 1fr; }
+    .case-row { grid-template-columns: 26px minmax(0, 1fr); }
+    .case-row .difficulty, .case-row > span:last-child { grid-column: 2; justify-self: start; }
+    .fusion-item { grid-template-columns: 34px 1fr; }
+    .fusion-item .score { grid-column: 2; text-align: left; }
+  }
+
+  /* 2026 visual refresh: professional legal evaluation console */
+  :root {
+    --bg: #f3f6fb;
+    --card: #ffffff;
+    --border: #dfe6ef;
+    --text: #172033;
+    --text-2: #697386;
+    --primary: #2457d6;
+    --primary-hover: #1946bb;
+    --primary-soft: #edf3ff;
+    --teal: #087e8b;
+    --shadow-sm: 0 1px 2px rgba(16, 35, 63, .04), 0 8px 24px rgba(16, 35, 63, .05);
+    --shadow-md: 0 18px 50px rgba(25, 48, 84, .10);
+  }
+  body {
+    min-height: 100vh;
+    background:
+      radial-gradient(circle at 92% 2%, rgba(36, 87, 214, .08), transparent 28rem),
+      linear-gradient(180deg, #f8faff 0, var(--bg) 22rem);
+    font-family: Inter, "SF Pro Display", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    letter-spacing: -.006em;
+  }
+  .wrap { max-width: 1280px; padding: 28px 28px 72px; }
+  .app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 28px;
+    padding: 23px 26px;
+    border: 1px solid rgba(205, 216, 232, .82);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, .82);
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(16px);
+  }
+  .brand-block { display: flex; align-items: center; gap: 16px; min-width: 0; }
+  .brand-mark {
+    flex: 0 0 52px;
+    width: 52px;
+    height: 52px;
+    display: grid;
+    place-items: center;
+    border-radius: 15px;
+    color: #fff;
+    background: linear-gradient(145deg, #173f9f, #2f6ef2);
+    box-shadow: 0 10px 24px rgba(36, 87, 214, .23);
+    font-family: "STSong", "Songti SC", serif;
+    font-size: 25px;
+    font-weight: 800;
+  }
+  .product-kicker { color: var(--primary); font-size: 11px; font-weight: 800; letter-spacing: .13em; text-transform: uppercase; }
+  .app-header h1 { margin-top: 2px; font-size: clamp(22px, 2.5vw, 31px); line-height: 1.25; font-weight: 760; letter-spacing: -.035em; }
+  .app-header p { margin-top: 5px; color: var(--text-2); font-size: 14px; }
+  .header-proof { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+  .proof-chip { padding: 7px 10px; border: 1px solid #d9e2f0; border-radius: 999px; background: #f8faff; color: #536177; font-size: 12px; font-weight: 650; white-space: nowrap; }
+  .proof-chip::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: #20a57a; vertical-align: 1px; }
+
+  .mode-switch {
+    position: sticky;
+    top: 10px;
+    z-index: 20;
+    width: fit-content;
+    max-width: 100%;
+    margin: 18px auto 0;
+    padding: 5px;
+    gap: 4px;
+    border: 1px solid rgba(211, 221, 234, .9);
+    border-radius: 14px;
+    background: rgba(255, 255, 255, .88);
+    box-shadow: 0 8px 25px rgba(24, 44, 75, .08);
+    backdrop-filter: blur(14px);
+  }
+  .mode-btn { min-height: 42px; border: 0; border-radius: 10px; padding: 8px 17px; background: transparent; color: #697386; font-weight: 650; transition: .18s ease; }
+  .mode-btn:hover { color: var(--text); background: #f3f6fa; }
+  .mode-btn.active { border: 0; background: #172b55; color: #fff; box-shadow: 0 5px 14px rgba(23, 43, 85, .22); }
+  .mode-number { display: inline-grid; place-items: center; width: 20px; height: 20px; margin-right: 7px; border-radius: 6px; background: rgba(105,115,134,.10); font-size: 11px; }
+  .mode-btn.active .mode-number { background: rgba(255,255,255,.15); }
+
+  .playground {
+    position: relative;
+    overflow: hidden;
+    margin: 20px 0 16px;
+    padding: 24px;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    background: #fff;
+    color: var(--text);
+    box-shadow: var(--shadow-md);
+  }
+  .playground::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 4px; background: linear-gradient(#2457d6, #12a7a2); }
+  .section-kicker { color: var(--primary); font-size: 11px; font-weight: 800; letter-spacing: .11em; text-transform: uppercase; }
+  .playground h2 { margin-top: 3px; font-size: 21px; letter-spacing: -.02em; }
+  .playground .sub { color: var(--text-2); margin: 3px 0 18px; font-size: 13px; }
+  .ask-row { grid-template-columns: minmax(0, 1fr) 132px; gap: 12px; }
+  .ask-input { min-height: 94px; border: 1px solid #cfd9e8; border-radius: 12px; background: #fbfcff; box-shadow: inset 0 1px 2px rgba(20, 38, 68, .03); }
+  .ask-input:hover { border-color: #aebdd2; }
+  .ask-input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 4px rgba(36,87,214,.10); background: #fff; }
+  .run-btn { border-radius: 11px; background: linear-gradient(145deg, #2457d6, #1747bb); color: #fff; box-shadow: 0 9px 22px rgba(36,87,214,.23); }
+  .run-btn:hover { background: linear-gradient(145deg, #2c64e6, #1946bb); box-shadow: 0 12px 25px rgba(36,87,214,.29); }
+  .run-btn:focus-visible, .ask-input:focus-visible, .model-choice select:focus-visible, .mode-btn:focus-visible, .secondary-btn:focus-visible { outline: 3px solid rgba(36,87,214,.28); outline-offset: 2px; }
+  .model-config { gap: 10px; margin-top: 14px; }
+  .model-choice { position: relative; gap: 7px; padding: 13px; border: 1px solid #e0e7f0; border-radius: 12px; background: linear-gradient(180deg, #fbfcff, #f7f9fd); }
+  .model-choice:hover { border-color: #bdcae0; box-shadow: 0 7px 20px rgba(24,44,75,.06); }
+  .model-choice span { color: var(--text); font-size: 13px; }
+  .model-choice small { min-height: 34px; color: var(--text-2); }
+  .model-choice select, .config-row select { border: 1px solid #d2dce9; background: #fff; color: var(--text); }
+  .config-row { gap: 8px; margin-top: 12px; color: #516077; }
+  .config-row label { min-height: 34px; padding: 5px 10px; border: 1px solid #e0e6ef; border-radius: 9px; background: #f8fafc; }
+  input[type="checkbox"] { accent-color: var(--primary); }
+  .examples { margin-top: 13px; padding-top: 12px; border-top: 1px dashed #dce3ec; }
+  .example-chip { border-color: #d8e1ed; background: #f7f9fc; color: #58677e; }
+  .example-chip:hover { border-color: #9eb2d3; background: var(--primary-soft); color: var(--primary); }
+  .service-status { background: #f4f7fb; color: #59677b; border: 1px solid #e1e7ef; }
+  .latency { color: #66758b; }
+
+  .chain-steps { gap: 5px; margin: 14px 0; padding: 7px; border: 1px solid var(--border); border-radius: 13px; background: rgba(255,255,255,.75); box-shadow: var(--shadow-sm); }
+  .chain-step { border: 0; border-radius: 8px; background: transparent; color: #778297; }
+  .chain-step.done { border: 0; background: #eaf2ff; color: #2457d6; }
+  .chain-step::after { color: #c8d0dd; }
+  .card, .flow-section, .summary-cell, .pipeline-config, .compare-answer, .badcase-box, .delta-card, .kpi { border-color: var(--border); box-shadow: var(--shadow-sm); }
+  .card, .flow-section { border-radius: 16px; padding: 20px; }
+  .flow-head h3, .card h2 { letter-spacing: -.02em; }
+  .retrieval-col, .fusion-item, .rerank-item, .context-box, .case-list, .case-result-table { border-color: #dfe6ef; border-radius: 12px; }
+  .retrieval-col h4, th { background: #f6f8fb; color: #435068; }
+  .rank { background: #eaf1ff; color: #2457d6; border-radius: 7px; }
+  .method-tag { background: #eef3ff; color: #315dbd; }
+  .answer-box { border-left-color: #0c8c91; background: #f0fbfb; }
+  .overall-score { background: linear-gradient(145deg, #183f99, #0a858b); box-shadow: 0 12px 28px rgba(24,63,153,.2); }
+  .metric-fill, .score-fill, .progress-fill { background: linear-gradient(90deg, #2457d6, #0e9c9a); }
+  .pipeline-config { background: #f8fafd; }
+  .pipeline-config:first-child { border-top: 3px solid #66758b; }
+  .pipeline-config:last-child { border-top: 3px solid var(--primary); }
+  .pipeline-fields label { color: #607087; font-weight: 650; }
+  .pipeline-fields select, .inline-form input, .batch-name, .compare-question { border-color: #d2dce9; border-radius: 10px; background: #fff; }
+  .secondary-btn { border-color: #d4deea; border-radius: 9px; color: #4d5c72; }
+  .secondary-btn:hover { background: var(--primary-soft); }
+  .case-row { transition: background .15s ease; }
+  .history-item { border-color: #dfe6ef; border-radius: 11px; }
+  .history-item:hover, .history-item.active { box-shadow: 0 7px 18px rgba(36,87,214,.08); }
+  .attribution { border-left-width: 3px; background: #eef4ff; color: #294a88; }
+  .footer { padding-top: 18px; border-top: 1px solid #dde4ed; }
+
+  @media (max-width: 1040px) {
+    .model-config { grid-template-columns: repeat(2, 1fr); }
+    .header-proof { max-width: 270px; }
+  }
+  @media (max-width: 760px) {
+    .wrap { padding: 14px 14px 52px; }
+    .app-header { align-items: flex-start; padding: 18px; border-radius: 16px; }
+    .brand-block { align-items: flex-start; }
+    .brand-mark { flex-basis: 43px; width: 43px; height: 43px; border-radius: 12px; font-size: 21px; }
+    .app-header h1 { font-size: 21px; }
+    .app-header p { font-size: 13px; line-height: 1.55; }
+    .header-proof { display: none; }
+    .mode-switch { position: static; width: 100%; display: grid; grid-template-columns: repeat(2, 1fr); border-radius: 13px; }
+    .mode-btn { min-height: 48px; padding: 7px 5px; font-size: 12px; line-height: 1.35; }
+    .mode-number { display: none; }
+    .playground { padding: 19px 17px; border-radius: 16px; }
+    .ask-row, .model-config { grid-template-columns: 1fr; }
+    .run-btn { min-height: 48px; }
+    .model-choice small { min-height: 0; }
+    .config-row { display: grid; grid-template-columns: 1fr; }
+    .config-row label { width: 100%; justify-content: flex-start; }
+    .chain-steps { grid-template-columns: repeat(3, 1fr); }
+    .card, .flow-section { padding: 16px; }
+    .case-row { grid-template-columns: 24px minmax(0, 1fr) auto; }
+    .case-row .difficulty { grid-column: 3; grid-row: 1; align-self: start; justify-self: end; }
+    .case-row > span:last-child { grid-column: 2 / 4; margin-top: -7px; }
+    table { min-width: 620px; }
+    .case-result-table, .card:has(> table) { overflow-x: auto; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="app-header">
+    <div class="brand-block">
+      <div class="brand-mark" aria-hidden="true">衡</div>
+      <div>
+        <div class="product-kicker">Legal RAG Evaluation Lab</div>
+        <h1>法律智能问答实验台</h1>
+        <p>从问题路由到法源检索、融合重排与质量评估，完整观察每一步结果。</p>
+      </div>
+    </div>
+    <div class="header-proof" aria-label="平台能力">
+      <span class="proof-chip">实时检索</span>
+      <span class="proof-chip">法源可追溯</span>
+      <span class="proof-chip">实验可复现</span>
+    </div>
+  </header>
+  <div class="mode-switch" role="tablist" aria-label="工作模式">
+    <button class="mode-btn active" id="singleModeBtn" role="tab" aria-selected="true"><span class="mode-number">01</span>单次问答</button>
+    <button class="mode-btn" id="compareModeBtn" role="tab" aria-selected="false"><span class="mode-number">02</span>A/B 对照实验</button>
+    <button class="mode-btn" id="batchModeBtn" role="tab" aria-selected="false"><span class="mode-number">03</span>批量评测与记录</button>
+    <button class="mode-btn" id="promptModeBtn" role="tab" aria-selected="false"><span class="mode-number">04</span>提示词实验室</button>
+  </div>
+
+  <div class="mode-view" id="singleMode">
+
+  <section class="playground" aria-labelledby="playTitle">
+    <div class="section-kicker">Live pipeline</div>
+    <h2 id="playTitle">运行一条完整法律问答链路</h2>
+    <p class="sub">输入任意问题，后端将实时执行意图识别、法律检索、融合重排和答案生成。</p>
+    <div class="ask-row">
+      <textarea class="ask-input" id="askInput" aria-label="输入用户问题">我在餐厅吃饭，滑倒摔断了腿，餐厅地板确实很滑且没放提示牌，我可以索赔吗？</textarea>
+      <button class="run-btn" id="runDemo">实时运行</button>
+    </div>
+    <div class="model-config" aria-label="各阶段模型选择">
+      <label class="model-choice"><span>① 意图识别与改写</span><select id="analysisModel" aria-label="意图识别与改写模型"><option>正在读取模型…</option></select><small>优先速度和稳定 JSON，不需要旗舰模型。</small></label>
+      <label class="model-choice"><span>② 法条适用性重排</span><select id="rerankModel" aria-label="法条适用性重排模型"><option>正在读取模型…</option></select><small>只筛选能够支持本案结论的法条，不参与最终措辞。</small></label>
+      <label class="model-choice"><span>③ 法律回答生成</span><select id="answerModel" aria-label="法律回答模型"><option>正在读取模型…</option></select><small>只接收重排后的证据，负责条件化结论和行动建议。</small></label>
+      <label class="model-choice"><span>④ 回答质量评估</span><select id="evaluationModel" aria-label="回答质量评估模型"><option>正在读取模型…</option></select><small>推荐使用比回答模型更强或不同家族的模型，减少自评偏差。</small></label>
+      <label class="model-choice"><span>⑤ 联网法源核验</span><select id="onlineModel" aria-label="联网检索模型"><option>正在读取模型…</option></select><small>核验法规时效和版本，优先保留政府与司法机关来源。</small></label>
+    </div>
+    <div class="config-row">
+      <label><input type="checkbox" id="useRewrite" checked> 启用 Query 改写</label>
+      <label><input type="checkbox" id="runEvaluation" checked> 运行质量评估</label>
+      <label><input type="checkbox" id="useOnlineSearch"> 权威法源联网核验（可能增加 30–90 秒）</label>
+      <label>检索策略 <select id="retrieveMode"><option>BM25 + BGE 向量 + RRF</option><option>仅 BM25</option><option>仅 BGE 向量</option></select></label>
+      <label>最终上下文 <select id="finalTopK"><option value="3">Top 3</option><option value="5" selected>Top 5</option></select></label>
+      <label>提示词版本 <select id="singlePromptProfile"><option value="default">默认提示词</option><option value="A">实验室 A</option><option value="B">实验室 B</option></select></label>
+    </div>
+    <div class="examples" aria-label="示例问题">
+      <button class="example-chip">我在工作中受伤，但公司说不是工伤，这怎么办？</button>
+      <button class="example-chip">买的房子有质量问题，开发商不修，怎么维权？</button>
+      <button class="example-chip">公司未经同意调休抵扣加班费，这可以吗？</button>
+    </div>
+    <div class="service-status" id="serviceStatus"><span class="status-dot"></span><span>正在检查实时服务</span></div>
+    <div class="latency" id="latency"></div>
+  </section>
+
+  <div class="chain-steps" aria-label="处理链路">
+    <div class="chain-step">1 意图识别</div><div class="chain-step">2 Query 改写</div>
+    <div class="chain-step">3 混合检索</div><div class="chain-step">4 RRF 融合</div>
+    <div class="chain-step">5 法条重排</div><div class="chain-step">6 联网核验</div>
+    <div class="chain-step">7 上下文组装</div><div class="chain-step">8 答案生成</div><div class="chain-step">9 质量评估</div>
+  </div>
+
+  <section class="chain-panel" id="chainPanel" aria-live="polite">
+    <div class="chain-summary" id="chainSummary"></div>
+    <div class="flow-section" id="retrievalSection"></div>
+    <div class="flow-section" id="fusionSection"></div>
+    <div class="flow-section" id="rerankSection"></div>
+    <div class="flow-section" id="onlineSection"></div>
+    <div class="flow-section" id="contextSection"></div>
+    <div class="flow-section" id="answerSection"></div>
+    <div class="flow-section" id="evaluationSection"></div>
+  </section>
+  </div>
+
+  <section class="mode-view hidden experiment-shell" id="compareMode">
+    <div class="card">
+      <h2>同题 A/B 对照实验</h2>
+      <p class="experiment-intro">建议每轮只改变一个变量，才能判断是检索、模型、联网核验还是上下文数量带来的提升。</p>
+      <textarea class="compare-question" id="compareInput" aria-label="对照实验问题">我男朋友把我打了，我该如何索赔？</textarea>
+      <div class="compare-configs">
+        <div class="pipeline-config">
+          <h3>方案 A · Baseline</h3>
+          <div class="pipeline-fields">
+            <label>检索策略<select id="cmpARetrieval"><option>仅 BM25</option><option>仅 BGE 向量</option><option>BM25 + BGE 向量 + RRF</option></select></label>
+            <label>最终上下文<select id="cmpATopK"><option value="3">Top 3</option><option value="5" selected>Top 5</option></select></label>
+            <label>分析模型<select id="cmpAAnalysis"></select></label>
+            <label>重排模型<select id="cmpARerank"></select></label>
+            <label>回答模型<select id="cmpAAnswer"></select></label>
+            <label>评估模型<select id="cmpAEvaluation"></select></label>
+            <label>联网模型<select id="cmpAOnline"></select></label>
+            <label>提示词版本<select id="cmpAPromptProfile"><option value="default">默认提示词</option><option value="A" selected>实验室 A</option><option value="B">实验室 B</option></select></label>
+          </div>
+          <div class="pipeline-checks"><label><input type="checkbox" id="cmpARewrite" checked> Query 改写</label><label><input type="checkbox" id="cmpAEval" checked> 自动评估</label><label><input type="checkbox" id="cmpAWeb"> 联网核验</label></div>
+        </div>
+        <div class="pipeline-config">
+          <h3>方案 B · Challenger</h3>
+          <div class="pipeline-fields">
+            <label>检索策略<select id="cmpBRetrieval"><option>仅 BM25</option><option>仅 BGE 向量</option><option selected>BM25 + BGE 向量 + RRF</option></select></label>
+            <label>最终上下文<select id="cmpBTopK"><option value="3">Top 3</option><option value="5" selected>Top 5</option></select></label>
+            <label>分析模型<select id="cmpBAnalysis"></select></label>
+            <label>重排模型<select id="cmpBRerank"></select></label>
+            <label>回答模型<select id="cmpBAnswer"></select></label>
+            <label>评估模型<select id="cmpBEvaluation"></select></label>
+            <label>联网模型<select id="cmpBOnline"></select></label>
+            <label>提示词版本<select id="cmpBPromptProfile"><option value="default">默认提示词</option><option value="A">实验室 A</option><option value="B" selected>实验室 B</option></select></label>
+          </div>
+          <div class="pipeline-checks"><label><input type="checkbox" id="cmpBRewrite" checked> Query 改写</label><label><input type="checkbox" id="cmpBEval" checked> 自动评估</label><label><input type="checkbox" id="cmpBWeb"> 联网核验</label></div>
+        </div>
+      </div>
+      <div class="compare-run"><p class="note">两套方案顺序运行，避免并发资源竞争污染延迟数据。</p><button class="run-btn" id="runCompare">运行 A/B 实验</button></div>
+      <div class="latency" id="compareStatus" style="color:var(--text-2)"></div>
+    </div>
+    <div class="compare-result" id="compareResult"></div>
+  </section>
+
+  <section class="mode-view hidden experiment-shell" id="batchMode">
+    <div class="batch-layout">
+      <div class="card">
+        <div class="batch-toolbar">
+          <div><h2>批量评测集</h2><p class="note" id="caseCount">正在读取样本…</p></div>
+          <div class="toolbar-actions">
+            <button class="secondary-btn" id="selectAllCases">全选</button>
+            <button class="secondary-btn" id="selectCoreCases">选择前 5 条</button>
+            <button class="secondary-btn" id="importCases">导入 JSON / CSV</button>
+            <input type="file" id="caseFile" accept=".json,.csv,application/json,text/csv" hidden>
+          </div>
+        </div>
+        <div class="case-list" id="caseList"><div class="case-row">正在加载评测集…</div></div>
+        <div class="inline-form" aria-label="新增评测样本">
+          <input id="newCaseQuestion" placeholder="新增一个法律问题">
+          <input id="newCaseCategory" placeholder="类别，如劳动争议">
+          <input id="newCaseLaws" placeholder="期望法源，用顿号分隔">
+          <button class="secondary-btn" id="addCase">加入评测集</button>
+        </div>
+        <p class="note">通过标准：意图正确、自动质量分达到样本阈值、期望法源至少命中一半且引用闭环通过。CSV 列名可用 question、category、expected_laws、quality_threshold、notes。</p>
+      </div>
+      <aside class="card">
+        <div class="batch-toolbar"><div><h2>实验记录</h2><p class="note">结果保存在本机数据库</p></div><button class="secondary-btn" id="refreshHistory">刷新</button></div>
+        <div class="history-list" id="historyList"><p class="note">尚无实验记录。</p></div>
+      </aside>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <h2>批量 A/B 配置</h2>
+      <p class="experiment-intro">默认只改变检索策略。建议一次实验只改一个变量，实验记录才具备清晰归因。</p>
+      <input class="batch-name" id="batchName" value="BM25 vs 混合检索" aria-label="实验名称">
+      <div class="batch-configs">
+        <div class="pipeline-config">
+          <h3>方案 A · Baseline</h3>
+          <div class="pipeline-fields">
+            <label>检索策略<select id="batchARetrieval"><option>仅 BM25</option><option>仅 BGE 向量</option><option>BM25 + BGE 向量 + RRF</option></select></label>
+            <label>最终上下文<select id="batchATopK"><option value="3">Top 3</option><option value="5" selected>Top 5</option></select></label>
+            <label>分析模型<select id="batchAAnalysis"></select></label>
+            <label>重排模型<select id="batchARerank"></select></label>
+            <label>回答模型<select id="batchAAnswer"></select></label>
+            <label>评估模型<select id="batchAEvaluation"></select></label>
+            <label>联网模型<select id="batchAOnline"></select></label>
+            <label>提示词版本<select id="batchAPromptProfile"><option value="default">默认提示词</option><option value="A" selected>实验室 A</option><option value="B">实验室 B</option></select></label>
+          </div>
+          <div class="pipeline-checks"><label><input type="checkbox" id="batchARewrite" checked> Query 改写</label><label><input type="checkbox" id="batchAEval" checked> 自动评估</label><label><input type="checkbox" id="batchAWeb"> 联网核验</label></div>
+        </div>
+        <div class="pipeline-config">
+          <h3>方案 B · Challenger</h3>
+          <div class="pipeline-fields">
+            <label>检索策略<select id="batchBRetrieval"><option>仅 BM25</option><option>仅 BGE 向量</option><option selected>BM25 + BGE 向量 + RRF</option></select></label>
+            <label>最终上下文<select id="batchBTopK"><option value="3">Top 3</option><option value="5" selected>Top 5</option></select></label>
+            <label>分析模型<select id="batchBAnalysis"></select></label>
+            <label>重排模型<select id="batchBRerank"></select></label>
+            <label>回答模型<select id="batchBAnswer"></select></label>
+            <label>评估模型<select id="batchBEvaluation"></select></label>
+            <label>联网模型<select id="batchBOnline"></select></label>
+            <label>提示词版本<select id="batchBPromptProfile"><option value="default">默认提示词</option><option value="A">实验室 A</option><option value="B" selected>实验室 B</option></select></label>
+          </div>
+          <div class="pipeline-checks"><label><input type="checkbox" id="batchBRewrite" checked> Query 改写</label><label><input type="checkbox" id="batchBEval" checked> 自动评估</label><label><input type="checkbox" id="batchBWeb"> 联网核验</label></div>
+        </div>
+      </div>
+      <div class="compare-run"><p class="note" id="batchEstimate">选择样本后运行；每条样本依次执行 A、B 两套完整链路。</p><button class="run-btn" id="runBatch">开始批量实验</button></div>
+      <div class="batch-progress" id="batchProgress"><strong id="batchProgressTitle">实验排队中</strong><div class="progress-track"><div class="progress-fill" id="batchProgressFill"></div></div><p class="note" id="batchProgressText"></p><button class="secondary-btn" id="cancelBatch">取消实验</button></div>
+    </div>
+    <div class="batch-result" id="batchResult"></div>
+  </section>
+
+  <section class="mode-view hidden experiment-shell" id="promptMode">
+    <div class="card prompt-shell">
+      <div class="prompt-toolbar">
+        <div>
+          <div class="section-kicker">Prompt Lab</div>
+          <h2>逐阶段提示词对照</h2>
+          <p class="experiment-intro">左侧和右侧分别是实验室 A、B。只修改一个阶段，再进入 A/B 或批量评测，结果会记录实际提示词与版本指纹。测试分析、重排或回答时请保持评估提示词一致，否则分数口径不可比。</p>
+        </div>
+        <div class="prompt-actions-group">
+          <button class="secondary-btn" id="resetAllPrompts">全部恢复默认</button>
+          <button class="secondary-btn" id="savePrompts">保存到本机浏览器</button>
+        </div>
+      </div>
+      <div class="prompt-stage-tabs" id="promptStageTabs" role="tablist" aria-label="提示词阶段"></div>
+      <div class="prompt-meta" id="promptMeta"></div>
+      <div class="prompt-editors">
+        <div class="prompt-editor">
+          <div class="prompt-editor-head"><h3>实验室 A · Baseline</h3><span class="prompt-version" id="promptVersionA">默认</span></div>
+          <textarea class="prompt-textarea" id="promptEditorA" aria-label="实验室 A 提示词"></textarea>
+        </div>
+        <div class="prompt-editor">
+          <div class="prompt-editor-head"><h3>实验室 B · Challenger</h3><span class="prompt-version" id="promptVersionB">默认</span></div>
+          <textarea class="prompt-textarea" id="promptEditorB" aria-label="实验室 B 提示词"></textarea>
+        </div>
+      </div>
+      <div class="prompt-actions">
+        <div class="prompt-actions-group">
+          <button class="secondary-btn" id="resetPromptA">A 恢复本阶段默认</button>
+          <button class="secondary-btn" id="copyPromptAToB">复制 A → B</button>
+          <button class="secondary-btn" id="resetPromptB">B 恢复本阶段默认</button>
+        </div>
+        <div class="prompt-actions-group">
+          <span class="prompt-save-state" id="promptSaveState">正在读取默认提示词…</span>
+          <button class="run-btn" id="usePromptsInCompare" style="padding:0 20px;min-height:42px">带入 A/B 对照实验</button>
+        </div>
+      </div>
+    </div>
+  </section>
+  <div class="footer">每次请求都实时检索本地法律索引，并可对检索证据、引用和答案质量进行自动评估。</div>
+</div>
+
+<script>
+const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const MODEL_INFO = {
+  "qwen3.8-flash": { short: "最新速度档", hint: "Qwen 最新高性价比模型，适合低延迟分析，也可作为快速回答基线。" },
+  "qwen3.7-flash": { short: "稳定速度基线", hint: "稳定的上一代 Flash，适合与 Qwen3.8-Flash 比较代际收益。" },
+  "qwen3.5-flash": { short: "历史速度基线", hint: "保留旧版 Flash，用于观察模型升级对意图和改写质量的真实提升。" },
+  "qwen3.8-27b": { short: "中等规模", hint: "用于比较中等参数规模与旗舰模型之间的质量、延迟和成本差异。" },
+  "qwen3.7-plus": { short: "平衡答案基线", hint: "当前稳定回答基线，在法律适用性、速度和成本之间比较均衡。" },
+  "qwen3.7-max": { short: "上一代旗舰", hint: "用于和 Qwen3.8-Max 比较旗舰模型的代际升级收益。" },
+  "qwen3.8-max": { short: "当前旗舰", hint: "当前最强 Qwen 档，适合高风险回答或更严格的自动评估。" },
+  "qwen3.5-plus": { short: "历史 Plus 基线", hint: "旧版 Plus 对照组，可量化从 Qwen3.5 升级后的质量变化。" },
+  "deepseek-v4-flash": { short: "跨家族速度对照", hint: "快速跨模型家族对照，可检验结果是否过度依赖 Qwen 的偏好。" },
+  "deepseek-v4-pro": { short: "跨家族强推理", hint: "强推理对照模型，适合复杂回答，也适合作为独立于 Qwen 的评估器。" },
+  "glm-5.2": { short: "中文跨家族对照", hint: "第三个模型家族，用来检验中文法律任务上的鲁棒性和评估一致性。" }
+};
+const PROMPT_STORAGE_KEY = "legal-rag-prompt-lab-v1";
+let promptCatalog = [];
+let activePromptStage = "analysis";
+let promptProfiles = { A: {}, B: {} };
+let promptEditorsReady = false;
+
+function defaultPrompt(stage) {
+  return (promptCatalog.find(item => item.id === stage) || {}).default_prompt || "";
+}
+function promptValue(side, stage) {
+  return Object.prototype.hasOwnProperty.call(promptProfiles[side] || {}, stage) ? promptProfiles[side][stage] : defaultPrompt(stage);
+}
+function flushPromptEditors() {
+  if (!promptCatalog.length || !promptEditorsReady) return;
+  promptProfiles.A[activePromptStage] = document.getElementById("promptEditorA").value;
+  promptProfiles.B[activePromptStage] = document.getElementById("promptEditorB").value;
+}
+function promptOverrides(profile) {
+  if (profile === "default") return {};
+  flushPromptEditors();
+  const values = promptProfiles[profile] || {};
+  return Object.fromEntries(promptCatalog
+    .filter(stage => String(values[stage.id] ?? stage.default_prompt).trim() !== String(stage.default_prompt).trim())
+    .map(stage => [stage.id, String(values[stage.id] ?? stage.default_prompt).trim()]));
+}
+function promptConfigFromSelect(id) {
+  const profile = document.getElementById(id).value;
+  return {
+    prompt_profile: profile === "default" ? "默认提示词" : `实验室 ${profile}`,
+    prompt_overrides: promptOverrides(profile)
+  };
+}
+function updatePromptStatus(message = "") {
+  const changedA = Object.keys(promptOverrides("A")).length;
+  const changedB = Object.keys(promptOverrides("B")).length;
+  document.getElementById("promptVersionA").textContent = changedA ? `共修改 ${changedA} 个阶段` : "全部为默认";
+  document.getElementById("promptVersionB").textContent = changedB ? `共修改 ${changedB} 个阶段` : "全部为默认";
+  document.getElementById("promptSaveState").textContent = message || `A 修改 ${changedA} 项 · B 修改 ${changedB} 项`;
+}
+function showPromptStage(stage) {
+  flushPromptEditors();
+  activePromptStage = stage;
+  const meta = promptCatalog.find(item => item.id === stage);
+  if (!meta) return;
+  document.querySelectorAll(".prompt-stage-btn").forEach(button => button.classList.toggle("active", button.dataset.stage === stage));
+  document.getElementById("promptMeta").innerHTML = `
+    <div><span>链路位置</span><strong>Step ${meta.step} · ${escapeHtml(meta.label)}</strong></div>
+    <div><span>输入</span><strong>${escapeHtml(meta.input)}</strong></div>
+    <div><span>期望输出</span><strong>${escapeHtml(meta.output)}</strong></div>`;
+  document.getElementById("promptEditorA").value = promptValue("A", stage);
+  document.getElementById("promptEditorB").value = promptValue("B", stage);
+  promptEditorsReady = true;
+  updatePromptStatus();
+}
+async function loadPromptCatalog() {
+  if (promptCatalog.length) return;
+  const response = await fetch("/api/prompts", { cache: "no-store" });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || "提示词读取失败");
+  promptCatalog = data.stages || [];
+  try {
+    const stored = JSON.parse(localStorage.getItem(PROMPT_STORAGE_KEY) || "null");
+    if (stored && stored.A && stored.B) promptProfiles = stored;
+  } catch (_) {}
+  document.getElementById("promptStageTabs").innerHTML = promptCatalog.map(item =>
+    `<button class="prompt-stage-btn" data-stage="${escapeHtml(item.id)}" role="tab">Step ${item.step} · ${escapeHtml(item.label)}</button>`
+  ).join("");
+  document.querySelectorAll(".prompt-stage-btn").forEach(button => button.addEventListener("click", () => showPromptStage(button.dataset.stage)));
+  showPromptStage(activePromptStage);
+}
+const badge = l => {
+  const cls = l === "法律类" ? "b-legal" : l === "违规类" ? "b-illegal" : l === "闲聊类" ? "b-chat" : "b-unk";
+  return `<span class="badge ${cls}">${l}</span>`;
+};
+
+// ---------- complete RAG chain demo ----------
+function clipped(text, limit = 160) {
+  const value = String(text || "").replace(/\s+/g, " ").trim();
+  return value.length > limit ? value.slice(0, limit) + "…" : value;
+}
+function hitList(items, label) {
+  return items.map((item, index) => {
+    const text = typeof item === "string" ? item : item.text;
+    const title = typeof item === "string" ? "" : item.title;
+    return `<div class="law-hit"><span class="rank">${index + 1}</span><div><span class="method-tag">${label}</span>${title ? `<strong>${escapeHtml(title)}</strong>` : ""}<div class="law-text">${escapeHtml(clipped(text, 190))}</div></div></div>`;
+  }).join("");
+}
+function renderNonLegal(question, intent) {
+  const isIllegal = intent === "违规类";
+  document.getElementById("chainSummary").innerHTML = `
+    <div class="summary-cell"><div class="eyebrow">意图</div><div class="main">${badge(intent)}</div></div>
+    <div class="summary-cell"><div class="eyebrow">路由结果</div><div class="main">${isIllegal ? "安全拒答，不进入检索" : "通用对话，不进入法律知识库"}</div></div>
+    <div class="summary-cell"><div class="eyebrow">处理策略</div><div class="main">${isIllegal ? "风险拦截" : "闲聊响应"}</div></div>`;
+  const message = isIllegal ? "该请求可能涉及违法或有害行为，系统不提供操作指导。" : "这是一个闲聊问题，无需检索法律条文。";
+  document.getElementById("retrievalSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">链路已终止</div><h3>${message}</h3></div></div>`;
+  ["fusionSection", "rerankSection", "onlineSection", "contextSection", "answerSection", "evaluationSection"].forEach(id => document.getElementById(id).style.display = "none");
+  document.querySelectorAll(".chain-step").forEach((step, index) => step.classList.toggle("done", index === 0));
+  document.getElementById("chainPanel").classList.add("show");
+}
+function intentForDisplay(intent) {
+  return intent === "法律咨询" ? "法律类" : intent === "违规请求" ? "违规类" : intent === "闲聊" ? "闲聊类" : intent;
+}
+function setServiceStatus(state, text) {
+  const node = document.getElementById("serviceStatus");
+  node.className = `service-status ${state || ""}`;
+  node.querySelector("span:last-child").textContent = text;
+}
+function updateModelHint(selectId) {
+  const select = document.getElementById(selectId);
+  const info = MODEL_INFO[select.value];
+  if (info) select.closest(".model-choice").querySelector("small").textContent = info.hint;
+}
+function fillModelSelect(id, options, selected, showDefault = false) {
+  const select = document.getElementById(id);
+  select.innerHTML = (options || []).map(model => {
+    const info = MODEL_INFO[model];
+    const suffix = info ? ` · ${info.short}` : "";
+    const defaultText = showDefault && model === selected ? " · 默认" : "";
+    return `<option value="${escapeHtml(model)}" ${model === selected ? "selected" : ""}>${escapeHtml(model + suffix + defaultText)}</option>`;
+  }).join("");
+  select.disabled = false;
+}
+async function checkHealth() {
+  try {
+    const response = await fetch("/api/healthz", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok || !data.ready) throw new Error(data.error || "服务尚未就绪");
+    setServiceStatus("ready", `实时服务已就绪 · 语料截止 ${data.corpus_cutoff}`);
+    const configs = [
+      ["analysisModel", data.model_options.analysis, data.analysis_model],
+      ["rerankModel", data.model_options.rerank, data.rerank_model],
+      ["answerModel", data.model_options.answer, data.answer_model],
+      ["evaluationModel", data.model_options.evaluation, data.evaluation_model],
+      ["onlineModel", data.model_options.online, data.online_search_model]
+    ];
+    configs.forEach(([id, options, selected]) => {
+      fillModelSelect(id, options, selected, true);
+      updateModelHint(id);
+    });
+    ["A", "B"].forEach(prefix => {
+      fillModelSelect(`cmp${prefix}Analysis`, data.model_options.analysis, data.analysis_model);
+      fillModelSelect(`cmp${prefix}Rerank`, data.model_options.rerank, data.rerank_model);
+      fillModelSelect(`cmp${prefix}Answer`, data.model_options.answer, data.answer_model);
+      fillModelSelect(`cmp${prefix}Evaluation`, data.model_options.evaluation, data.evaluation_model);
+      fillModelSelect(`cmp${prefix}Online`, data.model_options.online, data.online_search_model);
+      fillModelSelect(`batch${prefix}Analysis`, data.model_options.analysis, data.analysis_model);
+      fillModelSelect(`batch${prefix}Rerank`, data.model_options.rerank, data.rerank_model);
+      fillModelSelect(`batch${prefix}Answer`, data.model_options.answer, data.answer_model);
+      fillModelSelect(`batch${prefix}Evaluation`, data.model_options.evaluation, data.evaluation_model);
+      fillModelSelect(`batch${prefix}Online`, data.model_options.online, data.online_search_model);
+    });
+    syncEvaluationModel();
+    syncOnlineModels();
+  } catch (error) {
+    setServiceStatus("error", `实时服务不可用：${error.message}`);
+    ["analysisModel", "rerankModel", "answerModel", "evaluationModel", "onlineModel", "cmpAAnalysis", "cmpARerank", "cmpAAnswer", "cmpAEvaluation", "cmpAOnline", "cmpBAnalysis", "cmpBRerank", "cmpBAnswer", "cmpBEvaluation", "cmpBOnline", "batchAAnalysis", "batchARerank", "batchAAnswer", "batchAEvaluation", "batchAOnline", "batchBAnalysis", "batchBRerank", "batchBAnswer", "batchBEvaluation", "batchBOnline"].forEach(id => {
+      const select = document.getElementById(id);
+      select.innerHTML = "<option>后端未连接</option>";
+      select.disabled = true;
+    });
+  }
+}
+function syncEvaluationModel() {
+  document.getElementById("evaluationModel").disabled = !document.getElementById("runEvaluation").checked;
+}
+function syncOnlineModels() {
+  document.getElementById("onlineModel").disabled = !document.getElementById("useOnlineSearch").checked;
+  document.getElementById("cmpAOnline").disabled = !document.getElementById("cmpAWeb").checked;
+  document.getElementById("cmpBOnline").disabled = !document.getElementById("cmpBWeb").checked;
+  document.getElementById("batchAOnline").disabled = !document.getElementById("batchAWeb").checked;
+  document.getElementById("batchBOnline").disabled = !document.getElementById("batchBWeb").checked;
+}
+function renderLiveError(message) {
+  document.getElementById("chainPanel").classList.add("show");
+  document.getElementById("chainSummary").innerHTML = `<div class="summary-cell"><div class="eyebrow">请求失败</div><div class="main">${escapeHtml(message)}</div></div>`;
+  document.getElementById("retrievalSection").innerHTML = `<div class="answer-warning">请确认 Elasticsearch、FastAPI 和 API Key 均已就绪，然后重试。</div>`;
+  ["fusionSection", "rerankSection", "onlineSection", "contextSection", "answerSection", "evaluationSection"].forEach(id => document.getElementById(id).style.display = "none");
+}
+function citationHtml(entry) {
+  const local = (entry.evidence_ids || []).map(id => `<span class="citation-chip">[${Number(id)}]</span>`).join("");
+  const online = (entry.online_evidence_ids || []).map(id => `<span class="citation-chip">[联网${Number(id)}]</span>`).join("");
+  return local + online;
+}
+function renderStructuredAnswer(data) {
+  const structured = data.answer_structured || {};
+  const conclusion = structured.conclusion || {};
+  const sections = structured.sections || [];
+  if (!conclusion.text && !sections.length) return `<div class="answer-box">${escapeHtml(data.answer || "")}</div>`;
+  const lead = conclusion.text ? `<div class="answer-lead"><strong>初步结论</strong><p>${escapeHtml(conclusion.text)}${citationHtml(conclusion)}</p></div>` : "";
+  const cards = sections.map(section => `<div class="answer-section-card"><h4>${escapeHtml(section.title || "建议")}</h4><ol>${(section.items || []).map(item => `<li>${escapeHtml(item.text || "")}${citationHtml(item)}</li>`).join("")}</ol></div>`).join("");
+  const uncertain = (structured.uncertainties || []).length ? `<div class="answer-section-card"><h4>尚待确认</h4><ol>${structured.uncertainties.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div>` : "";
+  return `<div class="answer-structured">${lead}${cards}${uncertain}</div>`;
+}
+async function runInteractive() {
+  const input = document.getElementById("askInput");
+  const question = input.value.trim();
+  if (!question) { input.focus(); return; }
+  const button = document.getElementById("runDemo");
+  button.disabled = true;
+  button.textContent = "实时处理中…";
+  document.getElementById("latency").textContent = document.getElementById("useOnlineSearch").checked
+    ? "正在执行本地 RAG 与联网法源核验，通常需要 30–90 秒…"
+    : "正在调用模型并检索本地法律库，通常需要 10–30 秒…";
+  document.querySelectorAll(".chain-step").forEach(step => step.classList.remove("done"));
+  document.getElementById("chainPanel").classList.add("show");
+  document.getElementById("chainSummary").innerHTML = `<div class="summary-cell"><div class="eyebrow">实时请求</div><div class="main">正在分析问题并检索证据…</div></div>`;
+  ["fusionSection", "rerankSection", "onlineSection", "contextSection", "answerSection", "evaluationSection"].forEach(id => document.getElementById(id).style.display = "block");
+  const useRewrite = document.getElementById("useRewrite").checked;
+  const runEvaluation = document.getElementById("runEvaluation").checked;
+  const useOnlineSearch = document.getElementById("useOnlineSearch").checked;
+  const mode = document.getElementById("retrieveMode").value;
+  const topK = Number(document.getElementById("finalTopK").value);
+  const analysisModel = document.getElementById("analysisModel").value;
+  const rerankModel = document.getElementById("rerankModel").value;
+  const answerModel = document.getElementById("answerModel").value;
+  const evaluationModel = document.getElementById("evaluationModel").value;
+  const onlineSearchModel = document.getElementById("onlineModel").value;
+  const promptConfig = promptConfigFromSelect("singlePromptProfile");
+  try {
+    const response = await fetch("/api/legal-query", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, use_rewrite: useRewrite, retrieval_mode: mode, final_top_k: topK, run_evaluation: runEvaluation, use_online_search: useOnlineSearch, analysis_model: analysisModel, rerank_model: rerankModel, answer_model: answerModel, evaluation_model: evaluationModel, online_search_model: onlineSearchModel, ...promptConfig })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "实时请求失败");
+    const intent = intentForDisplay(data.intent);
+    if (intent !== "法律类") {
+      renderNonLegal(question, intent);
+      document.getElementById("latency").textContent = `实时完成 · ${Number(data.timings_sec.total || 0).toFixed(2)} 秒`;
+      return;
+    }
+    const bm25 = data.retrieval.bm25 || [], bge = data.retrieval.bge || [], fusion = data.retrieval.fusion || [];
+    const ranking = data.ranking || [];
+    document.getElementById("chainSummary").innerHTML = `
+      <div class="summary-cell"><div class="eyebrow">意图路由</div><div class="main">${badge(intent)} → 实时 RAG</div></div>
+      <div class="summary-cell"><div class="eyebrow">检索 Query ${data.use_rewrite ? "· 已改写" : "· 原问题"}</div><div class="main">${escapeHtml(data.retrieval_query)}</div></div>
+      <div class="summary-cell"><div class="eyebrow">本次模型与提示词</div><div class="main">分析 ${escapeHtml(data.models.analysis)} · 重排 ${escapeHtml(data.models.rerank)}<br>回答 ${escapeHtml(data.models.answer)} · ${escapeHtml((data.prompt_trace || {}).profile || "默认提示词")}${useOnlineSearch ? `<br>联网 ${escapeHtml(data.models.online)}` : ""}${runEvaluation ? `<br>评估 ${escapeHtml(data.models.evaluation)}` : ""}</div></div>`;
+    const bm25View = `<div class="retrieval-col"><h4>BM25 关键词召回 · Top ${bm25.length}</h4><div class="retrieval-scroll">${hitList(bm25, "BM25")}</div></div>`;
+    const bgeView = `<div class="retrieval-col"><h4>BGE 语义召回 · Top ${bge.length}</h4><div class="retrieval-scroll">${hitList(bge, "BGE")}</div></div>`;
+    const retrievalBody = mode === "仅 BM25" ? bm25View :
+      mode === "仅 BGE 向量" ? bgeView :
+      `<div class="retrieval-grid">${bm25View}${bgeView}</div>`;
+    document.getElementById("retrievalSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 3 · 实时初召回</div><h3>${escapeHtml(mode)}</h3></div><p>本次请求实时查询 Elasticsearch</p></div>${retrievalBody}`;
+    const fusionItems = fusion.slice(0, 8).map((item, index) => {
+      const ranks = Object.entries(item.ranks || {}).map(([k, v]) => `${k} #${v}`).join(" · ");
+      return `<div class="fusion-item"><span class="rank">${index + 1}</span><div><strong>${escapeHtml(item.title || "未命名法条")}</strong><div class="law-text">${escapeHtml(clipped(item.text, 210))}</div></div><div class="score">${escapeHtml(ranks)}<br>${mode.startsWith("BM25 +") ? "RRF" : "候选分"} ${Number(item.score).toFixed(4)}</div></div>`;
+    }).join("");
+    document.getElementById("fusionSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 4 · 候选融合</div><h3>${mode.startsWith("BM25 +") ? "RRF 去重融合" : "单路候选"}</h3></div><p>候选 ${fusion.length} 条</p></div><div class="fusion-list">${fusionItems}</div>`;
+    const maxScore = Math.max(...ranking.map(x => Number(x.score)), 1);
+    const rerankItems = ranking.map((item, index) => `<div class="rerank-item"><div class="rerank-meta"><span class="rank">${index + 1}</span><span class="selected-tag">${escapeHtml(item.applicability || "已选择")}</span><div class="score-track"><div class="score-fill" style="width:${Math.max(5, Number(item.score) / maxScore * 100).toFixed(0)}%"></div></div><span class="score">${Number(item.score).toFixed(0)}</span></div><strong>${escapeHtml(item.title || "未命名法条")}</strong><div class="law-text">${escapeHtml(clipped(item.text, 280))}</div><p class="note">${escapeHtml(item.reason || "")}</p></div>`).join("");
+    const trace = (data.prompt_trace || {}).stages || {};
+    document.getElementById("rerankSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 5 · 适用性精排</div><h3>${escapeHtml(data.models.rerank)} 法律适用性重排</h3></div><p>Prompt ${escapeHtml((trace.rerank || {}).version || "—")} · 最终 Top ${ranking.length}</p></div><div class="rerank-list">${rerankItems}</div>`;
+    const online = data.online_verification || { status: "disabled", official_sources: [] };
+    if (online.status === "disabled") {
+      document.getElementById("onlineSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 6 · 联网法源核验</div><h3>本次未启用</h3></div></div><p class="note">回答仅使用本地索引，仍需人工核对法规现行效力。</p>`;
+    } else {
+      const officialSources = online.official_sources || [];
+      const checkedSources = online.checked_official_sources || [];
+      const sourceHtml = officialSources.map(source => {
+        const href = source.final_url || source.url;
+        const label = source.title || source.domain || href;
+        const detailParts = [source.source_type || source.domain || "", source.validity || "", source.effective_date ? `施行 ${source.effective_date}` : "", source.http_status ? `HTTP ${source.http_status}` : ""];
+        const detail = detailParts.filter(Boolean).join(" · ");
+        const badge = source.verification_status === "official_database_record" ? "国家数据库精确匹配" : "已访问验证";
+        return `<div class="source-item"><div class="source-main"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">[联网${source.id}] ${escapeHtml(label)}</a><span class="source-detail">${escapeHtml(detail)}</span></div><span class="trusted-tag">${escapeHtml(badge)}</span></div>`;
+      }).join("");
+      const stateLabels = { completed: `已核验 ${officialSources.length} 个官方法源`, completed_with_search_degraded: `网页搜索已降级，但国家法律库已核验 ${officialSources.length} 项`, insufficient: "未建立官方法源闭环", timed_out: "联网核验超时，已降级", failed: "联网核验失败，已降级", unsupported: "当前服务商不支持法源链接" };
+      const stateText = stateLabels[online.status] || `核验状态：${online.status || "未知"}`;
+      const meta = [online.model || "", online.elapsed_sec != null ? `${Number(online.elapsed_sec).toFixed(2)}s` : "", checkedSources.length ? `候选 ${checkedSources.length}` : ""].filter(Boolean).join(" · ");
+      const warning = online.error ? `错误：${online.error}` : "搜索摘要不作为法源；只有完成官方域名、跳转链和 HTTP 原文验证的链接才进入回答证据。";
+      document.getElementById("onlineSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 6 · 联网法源核验</div><h3>${escapeHtml(stateText)}</h3></div><p>${escapeHtml(meta)}</p></div><div class="context-box">${escapeHtml(online.summary || "暂无联网摘要")}</div>${sourceHtml ? `<div class="source-list">${sourceHtml}</div>` : `<div class="answer-warning">${escapeHtml(warning)}</div>`}`;
+    }
+    const context = (data.contexts || []).map((item, index) => `[证据 ${item.id}] ${item.title}\n${item.text}`).join("\n\n");
+    const estimatedTokens = Math.round(context.length / 1.7);
+    document.getElementById("contextSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 7 · 上下文组装</div><h3>按适用性顺序构造证据上下文</h3></div><p>${ranking.length} 条 · 约 ${estimatedTokens} tokens</p></div><div class="context-box">${escapeHtml(context)}</div>`;
+    const questions = (data.follow_up_questions || []).map(x => `• ${x}`).join("\n");
+    const notices = [data.risk_notice, questions ? `需要补充：\n${questions}` : ""].filter(Boolean).join("\n\n");
+    document.getElementById("answerSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 8 · 受约束生成</div><h3>${escapeHtml(data.models.answer)} 法律回答</h3></div><p>Prompt ${escapeHtml((trace.answer || {}).version || "—")} · 仅使用最终入选证据</p></div>${renderStructuredAnswer(data)}${notices ? `<div class="answer-warning">${escapeHtml(notices)}</div>` : ""}<div class="answer-warning">仅作技术演示，不构成法律意见。当前离线语料截止 ${escapeHtml(data.corpus_cutoff)}，联网结果仍需打开权威原文核对。</div>`;
+    const evaluation = data.evaluation || { status: "disabled" };
+    if (evaluation.status === "completed") {
+      const labels = { groundedness: "证据忠实度", answer_relevance: "问题相关性", legal_applicability: "法律适用性", completeness: "回答完整性", safety: "风险处理", citation_quality: "引用质量" };
+      const metrics = Object.entries(evaluation.scores || {}).map(([key, value]) => `<div class="metric-row"><span>${labels[key] || escapeHtml(key)}</span><div class="metric-track"><div class="metric-fill" style="width:${Math.max(0, Math.min(100, Number(value)))}%"></div></div><strong>${Number(value).toFixed(0)}</strong></div>`).join("");
+      const issues = (evaluation.issues || []).map(item => `<div class="issue-item"><strong>${escapeHtml(item.severity || "提示")}</strong>${escapeHtml(item.detail || item.type || "")}${item.suggestion ? `<p class="note">建议：${escapeHtml(item.suggestion)}</p>` : ""}</div>`).join("");
+      const claimChecks = (evaluation.claim_checks || []).map(item => `<div class="issue-item"><strong>${escapeHtml(item.support || "待核验")}</strong>${escapeHtml(item.claim || "")}${item.reason ? `<p class="note">${escapeHtml(item.reason)}</p>` : ""}</div>`).join("");
+      const audit = evaluation.citation_audit || {};
+      document.getElementById("evaluationSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 9 · 自动评估</div><h3>本次回答质量</h3></div><p>${escapeHtml(evaluation.model)} · Prompt ${escapeHtml((trace.evaluation || {}).version || "—")} · ${escapeHtml(evaluation.verdict || "已完成")}</p></div><div class="evaluation-head"><div class="overall-score"><strong>${Number(evaluation.overall_score || 0).toFixed(0)}</strong><span>综合分 / 100</span></div><div class="metric-grid">${metrics}</div></div><div class="qbox"><div class="lbl">评估摘要</div>${escapeHtml(evaluation.summary || "暂无摘要")}</div><p class="note">引用 ${Number(audit.citation_count || 0)} 次 · ${audit.valid ? "引用编号检查通过" : "引用编号需要复核"} · 语料时效：${escapeHtml(evaluation.corpus_freshness || "需核验")}</p>${claimChecks ? `<h4 style="margin-top:12px">主张—证据核验</h4><div class="issue-list">${claimChecks}</div>` : ""}${issues ? `<h4 style="margin-top:12px">改进项</h4><div class="issue-list">${issues}</div>` : ""}`;
+    } else if (evaluation.status === "failed") {
+      document.getElementById("evaluationSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 9 · 自动评估</div><h3>评估未完成</h3></div></div><div class="answer-warning">${escapeHtml(evaluation.error || "评估模型调用失败，回答结果仍然可用。")}</div>`;
+    } else {
+      document.getElementById("evaluationSection").style.display = "none";
+    }
+    document.querySelectorAll(".chain-step").forEach((step, index) => step.classList.toggle("done", index < 8 || evaluation.status === "completed"));
+    const t = data.timings_sec;
+    const cost = data.cost || {};
+    document.getElementById("latency").textContent = `真实耗时：分析 ${Number(t.analysis).toFixed(2)}s · 检索 ${Number(t.retrieval).toFixed(2)}s · 联网 ${Number(t.online_search || 0).toFixed(2)}s · 重排 ${Number(t.rerank || 0).toFixed(2)}s · 回答 ${Number(t.answer || 0).toFixed(2)}s · 评估 ${Number(t.evaluation || 0).toFixed(2)}s · 总计 ${Number(t.total).toFixed(2)}s · ${Number(cost.total_tokens || 0)} tokens · 估算 ¥${Number(cost.estimated_cny || 0).toFixed(4)}`;
+    setServiceStatus("ready", `实时请求成功 · 语料截止 ${data.corpus_cutoff}`);
+  } catch (error) {
+    renderLiveError(error.message);
+    document.getElementById("latency").textContent = "请求未完成";
+    setServiceStatus("error", `实时服务异常：${error.message}`);
+  } finally {
+    button.disabled = false;
+    button.textContent = "实时运行";
+  }
+}
+function setMode(mode) {
+  ["single", "compare", "batch", "prompt"].forEach(name => {
+    document.getElementById(`${name}Mode`).classList.toggle("hidden", name !== mode);
+    const button = document.getElementById(`${name}ModeBtn`);
+    button.classList.toggle("active", name === mode);
+    button.setAttribute("aria-selected", String(name === mode));
+  });
+  if (mode === "batch") {
+    loadEvaluationCases();
+    loadExperimentHistory();
+  }
+  if (mode === "prompt") loadPromptCatalog().catch(error => { document.getElementById("promptSaveState").textContent = error.message; });
+}
+function comparisonPipeline(prefix, label) {
+  return {
+    label,
+    use_rewrite: document.getElementById(`cmp${prefix}Rewrite`).checked,
+    retrieval_mode: document.getElementById(`cmp${prefix}Retrieval`).value,
+    final_top_k: Number(document.getElementById(`cmp${prefix}TopK`).value),
+    run_evaluation: document.getElementById(`cmp${prefix}Eval`).checked,
+    use_online_search: document.getElementById(`cmp${prefix}Web`).checked,
+    analysis_model: document.getElementById(`cmp${prefix}Analysis`).value,
+    rerank_model: document.getElementById(`cmp${prefix}Rerank`).value,
+    answer_model: document.getElementById(`cmp${prefix}Answer`).value,
+    evaluation_model: document.getElementById(`cmp${prefix}Evaluation`).value,
+    online_search_model: document.getElementById(`cmp${prefix}Online`).value,
+    ...promptConfigFromSelect(`cmp${prefix}PromptProfile`)
+  };
+}
+function formatDelta(value, suffix = "") {
+  if (value === null || value === undefined) return "不可比";
+  const number = Number(value);
+  return `${number > 0 ? "+" : ""}${number.toFixed(suffix === " 秒" ? 2 : 4)}${suffix}`;
+}
+function runMetric(run) {
+  const result = run.result || {};
+  const evaluation = result.evaluation || {};
+  const cost = result.cost || {};
+  const online = result.online_verification || {};
+  return {
+    score: evaluation.overall_score,
+    verdict: evaluation.verdict || evaluation.status || "未评估",
+    latency: Number((result.timings_sec || {}).total || 0),
+    tokens: Number(cost.total_tokens || 0),
+    cost: cost.fully_priced ? Number(cost.estimated_cny || 0) : null,
+    citations: Boolean((evaluation.citation_audit || {}).valid),
+    officialSources: (online.official_sources || []).length,
+    topLaws: (result.ranking || []).map(item => item.title).filter(Boolean).join("、") || "无",
+    promptProfile: (result.prompt_trace || {}).profile || "默认提示词"
+  };
+}
+function renderComparison(data) {
+  const [runA, runB] = data.runs;
+  const a = runMetric(runA), b = runMetric(runB), c = data.comparison || {};
+  const badCases = run => (run.bad_cases || []).length
+    ? `<ul>${run.bad_cases.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+    : `<p class="note">本轮自动检查未发现中高风险项。</p>`;
+  document.getElementById("compareResult").innerHTML = `
+    <div class="card">
+      <h2>实验结论</h2>
+      <div class="delta-grid">
+        <div class="delta-card"><span>质量变化 B − A</span><strong>${c.quality_delta_b_minus_a == null ? "不可比" : formatDelta(c.quality_delta_b_minus_a, " 分")}</strong><p class="note">质量胜出：${escapeHtml(c.quality_winner)}</p></div>
+        <div class="delta-card"><span>延迟变化 B − A</span><strong>${formatDelta(c.latency_delta_b_minus_a, " 秒")}</strong><p class="note">速度胜出：${escapeHtml(c.speed_winner)}</p></div>
+        <div class="delta-card"><span>估算成本变化 B − A</span><strong>${c.cost_delta_b_minus_a == null ? "不可比" : `¥${formatDelta(c.cost_delta_b_minus_a)}`}</strong><p class="note">成本胜出：${escapeHtml(c.cost_winner)}</p></div>
+      </div>
+      <div class="attribution">${escapeHtml(c.attribution || "")}</div>
+      <table style="margin-top:14px"><tr><th>指标</th><th>${escapeHtml(runA.label)}</th><th>${escapeHtml(runB.label)}</th></tr>
+        <tr><td>质量分 / 结论</td><td>${a.score ?? "—"} · ${escapeHtml(a.verdict)}</td><td>${b.score ?? "—"} · ${escapeHtml(b.verdict)}</td></tr>
+        <tr><td>提示词版本</td><td>${escapeHtml(a.promptProfile)}</td><td>${escapeHtml(b.promptProfile)}</td></tr>
+        <tr><td>总延迟</td><td>${a.latency.toFixed(2)} 秒</td><td>${b.latency.toFixed(2)} 秒</td></tr>
+        <tr><td>Token / 估算费用</td><td>${a.tokens} / ${a.cost == null ? "价格不完整" : `¥${a.cost.toFixed(4)}`}</td><td>${b.tokens} / ${b.cost == null ? "价格不完整" : `¥${b.cost.toFixed(4)}`}</td></tr>
+        <tr><td>引用闭环</td><td>${a.citations ? "通过" : "未通过"}</td><td>${b.citations ? "通过" : "未通过"}</td></tr>
+        <tr><td>官方联网来源</td><td>${a.officialSources}</td><td>${b.officialSources}</td></tr>
+        <tr><td>最终法条</td><td>${escapeHtml(a.topLaws)}</td><td>${escapeHtml(b.topLaws)}</td></tr>
+      </table>
+    </div>
+    <div class="badcase-grid">
+      <div class="badcase-box"><h4>${escapeHtml(runA.label)} · Bad cases</h4>${badCases(runA)}</div>
+      <div class="badcase-box"><h4>${escapeHtml(runB.label)} · Bad cases</h4>${badCases(runB)}</div>
+    </div>
+    <div class="compare-answer-grid">
+      <div class="compare-answer"><h4>${escapeHtml(runA.label)} · 回答</h4><div class="answer-box">${escapeHtml((runA.result || {}).answer || "")}</div></div>
+      <div class="compare-answer"><h4>${escapeHtml(runB.label)} · 回答</h4><div class="answer-box">${escapeHtml((runB.result || {}).answer || "")}</div></div>
+    </div>`;
+  document.getElementById("compareResult").classList.add("show");
+}
+async function runComparison() {
+  const question = document.getElementById("compareInput").value.trim();
+  if (!question) { document.getElementById("compareInput").focus(); return; }
+  const button = document.getElementById("runCompare");
+  button.disabled = true;
+  button.textContent = "正在顺序运行 A / B…";
+  document.getElementById("compareStatus").textContent = "每套方案会独立执行检索、生成和评估，通常需要 1–2 分钟。";
+  document.getElementById("compareResult").classList.remove("show");
+  try {
+    const response = await fetch("/api/compare", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        question,
+        pipeline_a: comparisonPipeline("A", "方案 A"),
+        pipeline_b: comparisonPipeline("B", "方案 B")
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "对照实验失败");
+    renderComparison(data);
+    document.getElementById("compareStatus").textContent = "实验完成。费用为公开原价估算，实际账单可能受缓存、免费额度和活动影响。";
+  } catch (error) {
+    document.getElementById("compareStatus").textContent = `实验失败：${error.message}`;
+  } finally {
+    button.disabled = false;
+    button.textContent = "运行 A/B 实验";
+  }
+}
+let evaluationCases = [];
+let activeBatchId = null;
+let batchPollTimer = null;
+
+function selectedCaseIds() {
+  return [...document.querySelectorAll(".case-check:checked")].map(node => node.value);
+}
+function updateBatchEstimate() {
+  const count = selectedCaseIds().length;
+  const online = document.getElementById("batchAWeb").checked || document.getElementById("batchBWeb").checked;
+  document.getElementById("caseCount").textContent = `${evaluationCases.length} 条样本 · 已选 ${count} 条`;
+  document.getElementById("batchEstimate").textContent = count
+    ? `将执行 ${count * 2} 条完整链路${online ? "，包含联网核验，预计耗时较长" : ""}。任务可在实验记录中持续查看。`
+    : "请至少选择 1 条样本。";
+}
+function renderEvaluationCases(preserveSelection = true) {
+  const previous = preserveSelection ? new Set(selectedCaseIds()) : new Set(evaluationCases.slice(0, 5).map(item => item.id));
+  document.getElementById("caseList").innerHTML = evaluationCases.map(item => `
+    <label class="case-row">
+      <input class="case-check" type="checkbox" value="${escapeHtml(item.id)}" ${previous.has(item.id) ? "checked" : ""}>
+      <span><strong>${escapeHtml(item.question)}</strong><span class="case-meta">${escapeHtml(item.category)} · 期望法源：${escapeHtml((item.expected_laws || []).join("、") || "无（路由样本）")}</span></span>
+      <span class="difficulty">${escapeHtml(item.difficulty)}</span>
+      <span class="case-meta">≥${Number(item.quality_threshold || 0).toFixed(0)}</span>
+    </label>`).join("") || `<p class="note" style="padding:12px">暂无评测样本。</p>`;
+  document.querySelectorAll(".case-check").forEach(node => node.addEventListener("change", updateBatchEstimate));
+  updateBatchEstimate();
+}
+async function loadEvaluationCases() {
+  try {
+    const response = await fetch("/api/evaluation-cases", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "评测集读取失败");
+    const firstLoad = evaluationCases.length === 0;
+    evaluationCases = data.cases || [];
+    renderEvaluationCases(!firstLoad);
+  } catch (error) {
+    document.getElementById("caseList").innerHTML = `<div class="answer-warning">${escapeHtml(error.message)}</div>`;
+  }
+}
+async function saveEvaluationCases(cases) {
+  const response = await fetch("/api/evaluation-cases/import", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cases })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || "评测样本保存失败");
+  evaluationCases = data.cases || [];
+  renderEvaluationCases(false);
+  return data;
+}
+function splitCsvLine(line) {
+  const values = []; let value = ""; let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    if (char === '"' && quoted && line[index + 1] === '"') { value += '"'; index += 1; }
+    else if (char === '"') quoted = !quoted;
+    else if (char === "," && !quoted) { values.push(value.trim()); value = ""; }
+    else value += char;
+  }
+  values.push(value.trim());
+  return values;
+}
+function parseCaseFile(name, text) {
+  if (name.toLowerCase().endsWith(".json")) {
+    const value = JSON.parse(text);
+    return Array.isArray(value) ? value : value.cases;
+  }
+  const lines = text.replace(/^\uFEFF/, "").split(/\r?\n/).filter(line => line.trim());
+  const headers = splitCsvLine(lines.shift() || "");
+  return lines.map(line => {
+    const values = splitCsvLine(line); const row = Object.fromEntries(headers.map((key, index) => [key, values[index] || ""]));
+    return {
+      ...row,
+      tags: String(row.tags || "").split(/[、;|]/).filter(Boolean),
+      expected_laws: String(row.expected_laws || "").split(/[、;|]/).filter(Boolean),
+      quality_threshold: Number(row.quality_threshold || 80)
+    };
+  });
+}
+function batchPipeline(prefix, label) {
+  return {
+    label,
+    use_rewrite: document.getElementById(`batch${prefix}Rewrite`).checked,
+    retrieval_mode: document.getElementById(`batch${prefix}Retrieval`).value,
+    final_top_k: Number(document.getElementById(`batch${prefix}TopK`).value),
+    run_evaluation: document.getElementById(`batch${prefix}Eval`).checked,
+    use_online_search: document.getElementById(`batch${prefix}Web`).checked,
+    analysis_model: document.getElementById(`batch${prefix}Analysis`).value,
+    rerank_model: document.getElementById(`batch${prefix}Rerank`).value,
+    answer_model: document.getElementById(`batch${prefix}Answer`).value,
+    evaluation_model: document.getElementById(`batch${prefix}Evaluation`).value,
+    online_search_model: document.getElementById(`batch${prefix}Online`).value,
+    ...promptConfigFromSelect(`batch${prefix}PromptProfile`)
+  };
+}
+async function startBatchExperiment() {
+  const caseIds = selectedCaseIds();
+  if (!caseIds.length) { document.getElementById("caseList").focus(); return; }
+  const button = document.getElementById("runBatch");
+  button.disabled = true; button.textContent = "正在创建实验…";
+  try {
+    const response = await fetch("/api/batch-experiments", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: document.getElementById("batchName").value.trim() || "批量 A/B 实验",
+        case_ids: caseIds,
+        pipeline_a: batchPipeline("A", "方案 A"),
+        pipeline_b: batchPipeline("B", "方案 B")
+      })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "批量实验创建失败");
+    activeBatchId = data.id;
+    document.getElementById("batchProgress").classList.add("show");
+    document.getElementById("batchResult").classList.remove("show");
+    await pollBatchExperiment(data.id);
+  } catch (error) {
+    document.getElementById("batchEstimate").textContent = `创建失败：${error.message}`;
+  } finally {
+    button.disabled = false; button.textContent = "开始批量实验";
+  }
+}
+function statusText(status) {
+  return ({ queued: "排队中", running: "运行中", completed: "已完成", failed: "失败", cancelled: "已取消", cancelling: "正在取消", interrupted: "已中断" })[status] || status;
+}
+async function pollBatchExperiment(id) {
+  clearTimeout(batchPollTimer);
+  try {
+    const response = await fetch(`/api/batch-experiments/${encodeURIComponent(id)}`, { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "实验读取失败");
+    activeBatchId = id;
+    const ratio = data.total_cases ? data.completed_cases / data.total_cases : 0;
+    document.getElementById("batchProgress").classList.add("show");
+    document.getElementById("batchProgressTitle").textContent = `${data.name} · ${statusText(data.status)}`;
+    document.getElementById("batchProgressFill").style.width = `${Math.min(100, ratio * 100).toFixed(1)}%`;
+    document.getElementById("batchProgressText").textContent = `已完成 ${data.completed_cases} / ${data.total_cases} 条样本${data.error ? ` · ${data.error}` : ""}`;
+    document.getElementById("cancelBatch").disabled = !["queued", "running", "cancelling"].includes(data.status);
+    if (["queued", "running", "cancelling"].includes(data.status)) {
+      batchPollTimer = setTimeout(() => pollBatchExperiment(id), 2500);
+    } else {
+      renderBatchExperiment(data);
+      loadExperimentHistory();
+    }
+  } catch (error) {
+    document.getElementById("batchProgressText").textContent = error.message;
+  }
+}
+function pct(value) { return value == null ? "—" : `${(Number(value) * 100).toFixed(1)}%`; }
+function score(value) { return value == null ? "—" : Number(value).toFixed(1); }
+function renderBatchExperiment(data) {
+  if (!data.summary) {
+    document.getElementById("batchResult").innerHTML = `<div class="card"><div class="answer-warning">该实验没有可用汇总：${escapeHtml(data.error || statusText(data.status))}</div></div>`;
+    document.getElementById("batchResult").classList.add("show"); return;
+  }
+  const s = data.summary, a = s.pipeline_a, b = s.pipeline_b, d = s.delta_b_minus_a;
+  const rows = (data.case_results || []).map(item => {
+    if ((item.result || {}).error) return `<tr><td>${escapeHtml(item.question)}</td><td colspan="4" class="fail">执行失败：${escapeHtml(item.result.error)}</td></tr>`;
+    const [runA, runB] = item.result.runs, ba = runA.benchmark || {}, bb = runB.benchmark || {};
+    const failures = [...(ba.failures || []), ...(bb.failures || [])];
+    return `<tr><td><strong>${escapeHtml(item.category)}</strong><br>${escapeHtml(clipped(item.question, 72))}</td><td class="${ba.passed ? "pass" : "fail"}">${ba.passed ? "通过" : "失败"} · ${score(ba.quality_score)}</td><td class="${bb.passed ? "pass" : "fail"}">${bb.passed ? "通过" : "失败"} · ${score(bb.quality_score)}</td><td>${pct(ba.law_recall)} / ${pct(bb.law_recall)}</td><td>${escapeHtml(failures.join("；") || "—")}</td></tr>`;
+  }).join("");
+  document.getElementById("batchResult").innerHTML = `
+    <div class="card"><div class="flow-head"><div><div class="eyebrow">批量实验结论</div><h2>${escapeHtml(data.name)}</h2></div><p>${data.completed_cases} / ${data.total_cases} 条 · ${escapeHtml(s.corpus_cutoff)}</p></div>
+      <div class="attribution">${escapeHtml(s.attribution)}</div>
+      <div class="kpi-grid">
+        <div class="kpi"><span>平均质量 A → B</span><strong>${score(a.average_quality)} → ${score(b.average_quality)}</strong></div>
+        <div class="kpi"><span>通过率 A → B</span><strong>${pct(a.pass_rate)} → ${pct(b.pass_rate)}</strong></div>
+        <div class="kpi"><span>平均延迟 A → B</span><strong>${Number(a.average_latency_sec).toFixed(1)}s → ${Number(b.average_latency_sec).toFixed(1)}s</strong></div>
+        <div class="kpi"><span>总成本 A → B</span><strong>¥${Number(a.total_cost_cny).toFixed(4)} → ¥${Number(b.total_cost_cny).toFixed(4)}</strong></div>
+      </div>
+      <table><tr><th>指标</th><th>${escapeHtml(a.label)}</th><th>${escapeHtml(b.label)}</th><th>B − A</th></tr>
+        <tr><td>平均质量</td><td>${score(a.average_quality)}</td><td>${score(b.average_quality)}</td><td>${d.average_quality == null ? "—" : `${Number(d.average_quality) >= 0 ? "+" : ""}${Number(d.average_quality).toFixed(2)}`}</td></tr>
+        <tr><td>通过率</td><td>${pct(a.pass_rate)}</td><td>${pct(b.pass_rate)}</td><td>${pct(d.pass_rate)}</td></tr>
+        <tr><td>期望法源召回</td><td>${pct(a.average_expected_law_recall)}</td><td>${pct(b.average_expected_law_recall)}</td><td>${pct(d.average_expected_law_recall)}</td></tr>
+        <tr><td>引用闭环率</td><td>${pct(a.citation_valid_rate)}</td><td>${pct(b.citation_valid_rate)}</td><td>—</td></tr>
+        <tr><td>平均 / P95 延迟</td><td>${a.average_latency_sec}s / ${a.p95_latency_sec}s</td><td>${b.average_latency_sec}s / ${b.p95_latency_sec}s</td><td>${Number(d.average_latency_sec).toFixed(2)}s</td></tr>
+        <tr><td>Bad case</td><td>${a.bad_case_count}</td><td>${b.bad_case_count}</td><td>${b.bad_case_count - a.bad_case_count}</td></tr>
+      </table>
+    </div>
+    <div class="card" style="margin-top:12px"><h3>逐题结果与 Bad case</h3><div class="case-result-table"><table><tr><th>样本</th><th>方案 A</th><th>方案 B</th><th>法源召回 A / B</th><th>失败原因</th></tr>${rows}</table></div></div>`;
+  document.getElementById("batchResult").classList.add("show");
+}
+async function loadExperimentHistory() {
+  try {
+    const response = await fetch("/api/batch-experiments?limit=30", { cache: "no-store" });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "实验记录读取失败");
+    document.getElementById("historyList").innerHTML = (data.experiments || []).map(item => {
+      const summary = item.summary || {}, delta = (summary.delta_b_minus_a || {}).average_quality;
+      return `<button class="history-item ${item.id === activeBatchId ? "active" : ""}" data-id="${escapeHtml(item.id)}"><span class="history-top"><span>${escapeHtml(item.name)}</span><span class="status-pill">${escapeHtml(statusText(item.status))}</span></span><span class="case-meta">${item.completed_cases}/${item.total_cases} 条${delta == null ? "" : ` · 质量 Δ ${Number(delta) >= 0 ? "+" : ""}${Number(delta).toFixed(1)}`} · ${escapeHtml(String(item.created_at || "").replace("T", " ").slice(0, 16))}</span></button>`;
+    }).join("") || `<p class="note">尚无实验记录。</p>`;
+    document.querySelectorAll(".history-item").forEach(node => node.addEventListener("click", () => pollBatchExperiment(node.dataset.id)));
+  } catch (error) {
+    document.getElementById("historyList").innerHTML = `<div class="answer-warning">${escapeHtml(error.message)}</div>`;
+  }
+}
+document.getElementById("runDemo").addEventListener("click", runInteractive);
+document.getElementById("runEvaluation").addEventListener("change", syncEvaluationModel);
+document.getElementById("useOnlineSearch").addEventListener("change", syncOnlineModels);
+document.getElementById("cmpAWeb").addEventListener("change", syncOnlineModels);
+document.getElementById("cmpBWeb").addEventListener("change", syncOnlineModels);
+document.getElementById("batchAWeb").addEventListener("change", () => { syncOnlineModels(); updateBatchEstimate(); });
+document.getElementById("batchBWeb").addEventListener("change", () => { syncOnlineModels(); updateBatchEstimate(); });
+["analysisModel", "rerankModel", "answerModel", "evaluationModel", "onlineModel"].forEach(id => document.getElementById(id).addEventListener("change", () => updateModelHint(id)));
+document.getElementById("singleModeBtn").addEventListener("click", () => setMode("single"));
+document.getElementById("compareModeBtn").addEventListener("click", () => setMode("compare"));
+document.getElementById("batchModeBtn").addEventListener("click", () => setMode("batch"));
+document.getElementById("promptModeBtn").addEventListener("click", () => setMode("prompt"));
+document.getElementById("promptEditorA").addEventListener("input", () => { promptProfiles.A[activePromptStage] = document.getElementById("promptEditorA").value; updatePromptStatus("有未保存修改，可直接用于实验"); });
+document.getElementById("promptEditorB").addEventListener("input", () => { promptProfiles.B[activePromptStage] = document.getElementById("promptEditorB").value; updatePromptStatus("有未保存修改，可直接用于实验"); });
+document.getElementById("resetPromptA").addEventListener("click", () => { promptProfiles.A[activePromptStage] = defaultPrompt(activePromptStage); showPromptStage(activePromptStage); });
+document.getElementById("resetPromptB").addEventListener("click", () => { promptProfiles.B[activePromptStage] = defaultPrompt(activePromptStage); showPromptStage(activePromptStage); });
+document.getElementById("copyPromptAToB").addEventListener("click", () => { flushPromptEditors(); promptProfiles.B[activePromptStage] = promptProfiles.A[activePromptStage]; showPromptStage(activePromptStage); });
+document.getElementById("resetAllPrompts").addEventListener("click", () => { promptProfiles = { A: {}, B: {} }; promptEditorsReady = false; localStorage.removeItem(PROMPT_STORAGE_KEY); showPromptStage(activePromptStage); updatePromptStatus("已全部恢复默认"); });
+document.getElementById("savePrompts").addEventListener("click", () => { flushPromptEditors(); localStorage.setItem(PROMPT_STORAGE_KEY, JSON.stringify(promptProfiles)); updatePromptStatus("已保存到本机浏览器"); });
+document.getElementById("usePromptsInCompare").addEventListener("click", () => {
+  flushPromptEditors();
+  document.getElementById("cmpAPromptProfile").value = "A";
+  document.getElementById("cmpBPromptProfile").value = "B";
+  setMode("compare");
+  document.getElementById("compareStatus").textContent = "已带入实验室 A / B 提示词。保持模型和检索配置一致，即可只评估提示词差异。";
+});
+document.getElementById("runCompare").addEventListener("click", runComparison);
+document.getElementById("runBatch").addEventListener("click", startBatchExperiment);
+document.getElementById("refreshHistory").addEventListener("click", loadExperimentHistory);
+document.getElementById("historyList").addEventListener("click", event => {
+  const item = event.target.closest(".history-item");
+  if (!item) return;
+  activeBatchId = item.dataset.id;
+  pollBatchExperiment(activeBatchId);
+});
+document.getElementById("selectAllCases").addEventListener("click", () => {
+  const boxes = [...document.querySelectorAll(".case-check")];
+  const shouldSelect = boxes.some(box => !box.checked);
+  boxes.forEach(box => { box.checked = shouldSelect; }); updateBatchEstimate();
+  document.getElementById("selectAllCases").textContent = shouldSelect ? "取消全选" : "全选";
+});
+document.getElementById("selectCoreCases").addEventListener("click", () => {
+  [...document.querySelectorAll(".case-check")].forEach((box, index) => { box.checked = index < 5; }); updateBatchEstimate();
+});
+document.getElementById("importCases").addEventListener("click", () => document.getElementById("caseFile").click());
+document.getElementById("caseFile").addEventListener("change", async event => {
+  const file = event.target.files[0]; if (!file) return;
+  const button = document.getElementById("importCases"); button.disabled = true; button.textContent = "正在导入…";
+  try {
+    const cases = parseCaseFile(file.name, await file.text());
+    if (!Array.isArray(cases) || !cases.length) throw new Error("文件中没有可识别的样本");
+    const result = await saveEvaluationCases(cases);
+    button.textContent = `已导入 ${result.created + result.updated} 条`;
+  } catch (error) { button.textContent = `导入失败：${error.message}`; }
+  finally { setTimeout(() => { button.disabled = false; button.textContent = "导入 JSON / CSV"; }, 1800); event.target.value = ""; }
+});
+document.getElementById("addCase").addEventListener("click", async () => {
+  const question = document.getElementById("newCaseQuestion").value.trim(); if (!question) return;
+  const button = document.getElementById("addCase"); button.disabled = true;
+  try {
+    await saveEvaluationCases([{
+      question,
+      category: document.getElementById("newCaseCategory").value.trim() || "未分类",
+      expected_laws: document.getElementById("newCaseLaws").value.split(/[、;|]/).map(value => value.trim()).filter(Boolean),
+      expected_intent: "法律咨询", quality_threshold: 80
+    }]);
+    ["newCaseQuestion", "newCaseCategory", "newCaseLaws"].forEach(id => { document.getElementById(id).value = ""; });
+  } catch (error) { document.getElementById("caseCount").textContent = `新增失败：${error.message}`; }
+  finally { button.disabled = false; }
+});
+document.getElementById("cancelBatch").addEventListener("click", async () => {
+  if (!activeBatchId) return;
+  await fetch(`/api/batch-experiments/${encodeURIComponent(activeBatchId)}/cancel`, { method: "POST" });
+  pollBatchExperiment(activeBatchId);
+});
+document.getElementById("askInput").addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter") runInteractive();
+});
+document.querySelectorAll(".example-chip").forEach(chip => chip.addEventListener("click", () => {
+  document.getElementById("askInput").value = chip.textContent;
+  runInteractive();
+}));
+loadPromptCatalog().catch(error => { document.getElementById("promptSaveState").textContent = error.message; });
+checkHealth();
+</script>
+</body>
+</html>

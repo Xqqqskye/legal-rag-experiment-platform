@@ -9,3 +9,5 @@ openai>=1.50,<3.0
 httpx>=0.27,<1.0
 numpy>=1.26,<3.0
 sentence-transformers>=3.0,<6.0
+faiss-cpu>=1.8,<2.0
+requests>=2.31,<3.0

@@ -25,7 +25,6 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from sentence_transformers import SentenceTransformer
 
 from server.pipeline import (
     DEFAULT_PROMPTS,
@@ -35,15 +34,16 @@ from server.pipeline import (
     llm_client,
     rerank_candidates,
 )
-from server.retrieval import retrieve, rrf_candidates
+from server.qwen37_retrieval import Qwen37APIEmbedder, retrieve, retrieve_cases, rrf_candidates
 from server.experiment_store import ExperimentStore
+from server.chat_store import ChatStore
 from server.online_legal_search import search_official_legal_sources
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEMO_DIR = ROOT / "web"
 LOGGER = logging.getLogger("legal-rag-demo")
-ALLOWED_MODES = {"BM25 + BGE 向量 + RRF", "仅 BM25", "仅 BGE 向量"}
+ALLOWED_MODES = {"BM25 + Qwen3.7 向量 + RRF", "仅 BM25", "仅 Qwen3.7 向量"}
 PROMPT_STAGES = ("analysis", "rerank", "answer", "online", "evaluation")
 PROMPT_STAGE_META = {
     "analysis": {"label": "意图识别与 Query 改写", "step": 1, "input": "原始问题", "output": "意图、改写、争点、证据缺口"},
@@ -109,7 +109,7 @@ MODEL_PRICING_SNAPSHOT_DATE = os.getenv("MODEL_PRICING_SNAPSHOT_DATE", "2026-09-
 class LegalQueryRequest(BaseModel):
     question: str = Field(min_length=2, max_length=1200)
     use_rewrite: bool = True
-    retrieval_mode: str = "BM25 + BGE 向量 + RRF"
+    retrieval_mode: str = "BM25 + Qwen3.7 向量 + RRF"
     final_top_k: int = Field(default=5, ge=1, le=5)
     run_evaluation: bool = True
     use_online_search: bool = False
@@ -120,12 +120,36 @@ class LegalQueryRequest(BaseModel):
     online_search_model: str | None = Field(default=None, max_length=100)
     prompt_profile: str = Field(default="默认提示词", max_length=40)
     prompt_overrides: dict[str, str] = Field(default_factory=dict)
+    conversation_history: list[dict[str, str]] = Field(default_factory=list, max_length=20)
+    case_memory: dict[str, Any] = Field(default_factory=dict)
+    skip_rerank: bool = False
+
+
+class ChatSessionCreateRequest(BaseModel):
+    title: str = Field(default="新的法律咨询", max_length=120)
+
+
+class ChatMessageRequest(BaseModel):
+    message: str = Field(min_length=2, max_length=1200)
+    use_rewrite: bool = True
+    retrieval_mode: str = "BM25 + Qwen3.7 向量 + RRF"
+    final_top_k: int = Field(default=5, ge=1, le=5)
+    run_evaluation: bool = False
+    use_online_search: bool = False
+    analysis_model: str | None = Field(default=None, max_length=100)
+    rerank_model: str | None = Field(default=None, max_length=100)
+    answer_model: str | None = Field(default=None, max_length=100)
+    evaluation_model: str | None = Field(default=None, max_length=100)
+    online_search_model: str | None = Field(default=None, max_length=100)
+    prompt_profile: str = Field(default="默认提示词", max_length=40)
+    prompt_overrides: dict[str, str] = Field(default_factory=dict)
+    skip_rerank: bool = True
 
 
 class ExperimentPipelineConfig(BaseModel):
     label: str = Field(default="方案", min_length=1, max_length=30)
     use_rewrite: bool = True
-    retrieval_mode: str = "BM25 + BGE 向量 + RRF"
+    retrieval_mode: str = "BM25 + Qwen3.7 向量 + RRF"
     final_top_k: int = Field(default=5, ge=1, le=5)
     run_evaluation: bool = True
     use_online_search: bool = False
@@ -170,7 +194,7 @@ class BatchExperimentRequest(BaseModel):
 class Runtime:
     def __init__(self) -> None:
         self.es: Elasticsearch | None = None
-        self.embedder: SentenceTransformer | None = None
+        self.embedder: Qwen37APIEmbedder | None = None
         self.client: Any = None
         self.provider = ""
         self.analysis_model = ""
@@ -183,16 +207,21 @@ class Runtime:
 
     def initialize(self) -> None:
         self.es = Elasticsearch(os.getenv("ES_URL", "http://127.0.0.1:9200"), request_timeout=30)
-        if not self.es.ping():
-            raise RuntimeError("Elasticsearch 未启动或无法连接")
+        try:
+            es_available = self.es.ping()
+        except Exception:
+            es_available = False
+        if not es_available:
+            LOGGER.warning("Elasticsearch 未启动，将使用本地 BM25 兜底")
+            self.es = None
 
-        model_path = os.getenv("BGE_LARGE_MODEL", "BAAI/bge-small-zh-v1.5")
-        self.embedder = SentenceTransformer(model_path, device=os.getenv("EMB_DEVICE", "cpu"))
+        self.embedder = Qwen37APIEmbedder()
         self.client, default_model, self.provider = llm_client()
         if self.provider == "dashscope":
             self.analysis_model = os.getenv("DASHSCOPE_ANALYSIS_MODEL", "qwen3.8-flash")
             self.rerank_model = os.getenv("DASHSCOPE_RERANK_MODEL", "qwen3.7-plus")
-            self.answer_model = os.getenv("DASHSCOPE_ANSWER_MODEL", default_model)
+            # 默认走 Flash 以降低交互延迟；需要更强答案时可通过环境变量或前端下拉框切换。
+            self.answer_model = os.getenv("DASHSCOPE_ANSWER_MODEL", "qwen3.8-flash")
             self.evaluation_model = os.getenv("DASHSCOPE_EVAL_MODEL", "qwen3.8-max")
             self.online_search_model = os.getenv("DASHSCOPE_ONLINE_MODEL", "qwen-flash")
         else:
@@ -204,7 +233,7 @@ class Runtime:
 
     @property
     def ready(self) -> bool:
-        return bool(self.es is not None and self.embedder is not None and self.client is not None and not self.error)
+        return bool(self.embedder is not None and self.client is not None and not self.error)
 
     def close(self) -> None:
         if self.es is not None:
@@ -213,6 +242,7 @@ class Runtime:
 
 runtime = Runtime()
 experiment_store = ExperimentStore()
+chat_store = ChatStore()
 batch_tasks: dict[str, asyncio.Task[Any]] = {}
 
 
@@ -277,6 +307,7 @@ def _prompt_trace(prompts: dict[str, str], overrides: dict[str, str] | None, pro
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     await asyncio.to_thread(experiment_store.initialize)
+    await asyncio.to_thread(chat_store.initialize)
     try:
         await asyncio.to_thread(runtime.initialize)
     except Exception as exc:  # Keep the page available so it can show setup errors.
@@ -316,11 +347,33 @@ def _single_candidates(hits: list[dict[str, Any]], source_name: str) -> list[dic
                 "chunk_id": source.get("chunk_id") or hit.get("_id", ""),
                 "title": source.get("title", ""),
                 "text": source.get("text", ""),
+                "corpus": source.get("corpus", "law"),
                 "ranks": {source_name: rank},
                 "rrf": 1.0 / (rrf_k + rank),
             }
         )
     return candidates
+
+
+def _direct_rrf_ranking(candidates: list[dict[str, Any]], final_top_k: int) -> list[dict[str, Any]]:
+    """Convert RRF candidates to the same evidence shape as LLM reranking."""
+    ranking: list[dict[str, Any]] = []
+    for index, item in enumerate(candidates[:final_top_k], start=1):
+        ranking.append(
+            {
+                "id": index,
+                "title": item.get("title", ""),
+                "text": item.get("text", ""),
+                "corpus": item.get("corpus", "law"),
+                "retrieval_ranks": item.get("ranks", {}),
+                "score": round(float(item.get("rrf") or 0.0) * 100, 4),
+                "applicability": "直接 RRF 候选",
+                "reason": "未调用 LLM 重排，按 BM25/Qwen3.7 向量 RRF 分数排序。",
+                "supports": [],
+                "limitations": ["未经过法律适用性精排，需结合回答中的不确定性复核。"],
+            }
+        )
+    return ranking
 
 
 def _usage_view(usage: Any) -> dict[str, int]:
@@ -609,7 +662,8 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
     prompt_trace = _prompt_trace(prompts, payload.prompt_overrides, payload.prompt_profile)
 
     started = time.perf_counter()
-    analysis = analyze_query(runtime.client, analysis_model, payload.question, prompts["analysis"])
+    effective_question = _contextual_question(payload)
+    analysis = analyze_query(runtime.client, analysis_model, effective_question, prompts["analysis"])
     analysis_usage = _usage_view(analysis.pop("_usage", None))
     after_analysis = time.perf_counter()
     intent = str(analysis.get("intent") or "未知")
@@ -622,7 +676,7 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
             "models": {"analysis": analysis_model, "rerank": rerank_model, "answer": answer_model, "evaluation": evaluation_model, "online": online_search_model},
             "prompt_trace": prompt_trace,
             "answer": "该问题未进入法律检索链路。",
-            "retrieval": {"bm25": [], "bge": [], "fusion": []},
+            "retrieval": {"bm25": [], "qwen37": [], "cases_qwen37": [], "fusion": []},
             "ranking": [],
             "contexts": [],
             "follow_up_questions": [],
@@ -636,15 +690,17 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
 
     rewrite = str(analysis.get("rewrite_query") or "").strip()
     retrieval_query = rewrite if payload.use_rewrite and rewrite else payload.question
-    bm25_hits, dense_hits = retrieve(runtime.es, runtime.embedder, retrieval_query)
+    use_dense = payload.retrieval_mode != "仅 BM25"
+    bm25_hits, dense_hits = retrieve(runtime.es, runtime.embedder, retrieval_query, include_dense=use_dense)
+    case_dense_hits = retrieve_cases(runtime.embedder, retrieval_query) if use_dense else []
     after_retrieval = time.perf_counter()
 
     if payload.retrieval_mode == "仅 BM25":
         candidates = _single_candidates(bm25_hits, "bm25")
-    elif payload.retrieval_mode == "仅 BGE 向量":
-        candidates = _single_candidates(dense_hits, "bge")
+    elif payload.retrieval_mode == "仅 Qwen3.7 向量":
+        candidates = _single_candidates(dense_hits + case_dense_hits, "qwen37")
     else:
-        candidates = rrf_candidates(bm25_hits, dense_hits, int(os.getenv("RRF_K", "60")))
+        candidates = rrf_candidates(bm25_hits, dense_hits, case_dense_hits, int(os.getenv("RRF_K", "60")))
     candidates = candidates[: int(os.getenv("RRF_TOPK", "20"))]
     after_fusion = time.perf_counter()
 
@@ -659,22 +715,27 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
         "official_sources": online_verification.get("official_sources") or [],
     }
 
-    rerank_result = rerank_candidates(
-        runtime.client,
-        rerank_model,
-        payload.question,
-        analysis,
-        candidates,
-        prompts["rerank"],
-    )
-    rerank_usage = _usage_view(rerank_result.pop("_usage", None))
-    ranking = _merge_ranking(rerank_result, payload.final_top_k)
+    if payload.skip_rerank:
+        rerank_result = {"candidates": [], "ranking": []}
+        rerank_usage = _usage_view(None)
+        ranking = _direct_rrf_ranking(candidates, payload.final_top_k)
+    else:
+        rerank_result = rerank_candidates(
+            runtime.client,
+            rerank_model,
+            effective_question,
+            analysis,
+            candidates,
+            prompts["rerank"],
+        )
+        rerank_usage = _usage_view(rerank_result.pop("_usage", None))
+        ranking = _merge_ranking(rerank_result, payload.final_top_k)
     after_rerank = time.perf_counter()
 
     answer_result = generate_answer(
         runtime.client,
         answer_model,
-        payload.question,
+        effective_question,
         analysis,
         ranking,
         online_for_answer,
@@ -690,11 +751,11 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
     corpus_cutoff = os.getenv("CORPUS_CUTOFF", "2022-06-24")
     if payload.run_evaluation:
         evaluation = _evaluate_answer(
-            payload.question,
+            effective_question,
             rendered_answer,
             analysis,
             ranking,
-            len(rerank_result.get("candidates") or []),
+            len(rerank_result.get("candidates") or candidates),
             corpus_cutoff,
             evaluation_model,
             online_for_answer,
@@ -726,17 +787,20 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
         "retrieval_query": retrieval_query,
         "use_rewrite": payload.use_rewrite,
         "retrieval_mode": payload.retrieval_mode,
+        "rerank_skipped": payload.skip_rerank,
         "models": {"analysis": analysis_model, "rerank": rerank_model, "answer": answer_model, "evaluation": evaluation_model, "online": online_search_model},
         "prompt_trace": prompt_trace,
         "retrieval": {
             "bm25": [_hit_view(hit, rank) for rank, hit in enumerate(bm25_hits, start=1)],
-            "bge": [_hit_view(hit, rank) for rank, hit in enumerate(dense_hits, start=1)],
+            "qwen37": [_hit_view(hit, rank) for rank, hit in enumerate(dense_hits, start=1)],
+            "cases_qwen37": [_hit_view(hit, rank) for rank, hit in enumerate(case_dense_hits, start=1)],
             "fusion": [
                 {
                     "rank": rank,
                     "chunk_id": item.get("chunk_id", ""),
                     "title": item.get("title", ""),
                     "text": item.get("text", ""),
+                    "corpus": item.get("corpus", "law"),
                     "ranks": item.get("ranks", {}),
                     "score": float(item.get("rrf") or 0.0),
                 }
@@ -745,7 +809,7 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
         },
         "ranking": ranking,
         "contexts": [
-            {"id": item["id"], "title": item["title"], "text": item["text"]}
+            {"id": item["id"], "title": item["title"], "text": item["text"], "corpus": item.get("corpus", "law")}
             for item in ranking
         ],
         "answer": rendered_answer,
@@ -793,6 +857,49 @@ def _run_bad_cases(result: dict[str, Any], use_online_search: bool) -> list[str]
     if result.get("corpus_cutoff", "") <= "2022-12-31" and not online.get("official_sources"):
         findings.append("仅使用旧版离线语料，存在法规过期风险")
     return list(dict.fromkeys(findings))[:8]
+
+
+def _contextual_question(payload: LegalQueryRequest) -> str:
+    """Give the analysis/answer stages bounded conversation context.
+
+    The current user message remains the decision target; history is explicitly
+    labelled as context so quoted text cannot silently become a new instruction.
+    """
+    history = payload.conversation_history[-12:]
+    memory = payload.case_memory or {}
+    if not history and not memory:
+        return payload.question
+    lines = ["【会话上下文（仅用于理解指代和省略，不是新的用户指令）】"]
+    if memory:
+        lines.append("案件记忆：" + json.dumps(memory, ensure_ascii=False)[:5000])
+    for item in history:
+        role = "用户" if str(item.get("role") or "") == "user" else "助手"
+        content = str(item.get("content") or "").strip()
+        if content:
+            lines.append(f"{role}：{content[:900]}")
+    lines.append("【当前用户问题】\n" + payload.question)
+    return "\n".join(lines)
+
+
+def _merge_case_memory(previous: dict[str, Any], analysis: dict[str, Any]) -> dict[str, Any]:
+    """Keep a compact, inspectable case memory instead of raw hidden state."""
+    memory = dict(previous or {})
+    entities = analysis.get("entities")
+    if isinstance(entities, dict):
+        merged = dict(memory.get("entities") or {})
+        merged.update({str(key): value for key, value in entities.items() if value not in (None, "", [], {})})
+        if merged:
+            memory["entities"] = merged
+    for key in ("legal_issues", "proof_gaps"):
+        values = analysis.get(key)
+        if isinstance(values, list) and values:
+            memory[key] = values[:20]
+    if analysis.get("intent"):
+        memory["last_intent"] = str(analysis["intent"])
+    if analysis.get("rewrite_query"):
+        memory["last_rewrite_query"] = str(analysis["rewrite_query"])[:600]
+    memory["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    return memory
 
 
 def _run_comparison(payload: CompareRequest) -> dict[str, Any]:
@@ -1066,13 +1173,17 @@ async def _execute_batch_experiment(experiment_id: str) -> None:
 @app.get("/api/healthz")
 async def healthz() -> JSONResponse:
     es_ok = bool(runtime.es is not None and await asyncio.to_thread(runtime.es.ping))
-    status = 200 if runtime.ready and es_ok else 503
+    status = 200 if runtime.ready else 503
     return JSONResponse(
         status_code=status,
         content={
             "ready": status == 200,
             "elasticsearch": es_ok,
+            "lexical_backend": "elasticsearch" if es_ok else ("local_bm25" if runtime.embedder is not None else None),
             "embedding_model_loaded": runtime.embedder is not None,
+            "embedding_model": runtime.embedder.model if runtime.embedder is not None else None,
+            "law_dense_index_rows": runtime.embedder.law_index.index.ntotal if runtime.embedder is not None else 0,
+            "case_dense_index_rows": runtime.embedder.case_index.index.ntotal if runtime.embedder is not None else 0,
             "provider": runtime.provider or None,
             "analysis_model": runtime.analysis_model or None,
             "rerank_model": runtime.rerank_model or None,
@@ -1115,6 +1226,108 @@ async def legal_query(payload: LegalQueryRequest, request: Request) -> dict[str,
         except Exception as exc:
             LOGGER.exception("Live query failed: client=%s", request.client.host if request.client else "unknown")
             raise HTTPException(status_code=502, detail=f"实时链路执行失败：{exc}") from exc
+
+
+@app.post("/api/chat/sessions")
+async def create_chat_session(payload: ChatSessionCreateRequest) -> dict[str, Any]:
+    return await asyncio.to_thread(chat_store.create_session, payload.title)
+
+
+@app.get("/api/chat/sessions")
+async def list_chat_sessions(limit: int = 30) -> dict[str, Any]:
+    sessions = await asyncio.to_thread(chat_store.list_sessions, limit)
+    return {"sessions": sessions, "count": len(sessions)}
+
+
+@app.get("/api/chat/sessions/{session_id}")
+async def get_chat_session(session_id: str) -> dict[str, Any]:
+    session = await asyncio.to_thread(chat_store.get_session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return session
+
+
+@app.delete("/api/chat/sessions/{session_id}")
+async def delete_chat_session(session_id: str) -> dict[str, Any]:
+    deleted = await asyncio.to_thread(chat_store.delete_session, session_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    return {"deleted": True, "id": session_id}
+
+
+@app.post("/api/chat/sessions/{session_id}/messages")
+async def send_chat_message(session_id: str, payload: ChatMessageRequest, request: Request) -> dict[str, Any]:
+    if not runtime.ready:
+        raise HTTPException(status_code=503, detail=runtime.error or "实时检索服务尚未就绪")
+    session = await asyncio.to_thread(chat_store.get_session, session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    previous_messages = [
+        {"role": item.get("role", ""), "content": item.get("content", "")}
+        for item in session.get("messages", [])[-12:]
+    ]
+    title = payload.message.strip()[:40] if not previous_messages else None
+    await asyncio.to_thread(
+        chat_store.append_message,
+        session_id,
+        "user",
+        payload.message.strip(),
+        None,
+        title,
+        None,
+    )
+    fast_analysis_model = payload.analysis_model or ("qwen3.8-flash" if runtime.provider == "dashscope" else None)
+    fast_answer_model = payload.answer_model or ("qwen3.8-flash" if runtime.provider == "dashscope" else None)
+    query = LegalQueryRequest(
+        question=payload.message.strip(),
+        use_rewrite=payload.use_rewrite,
+        retrieval_mode=payload.retrieval_mode,
+        final_top_k=payload.final_top_k,
+        run_evaluation=payload.run_evaluation,
+        use_online_search=payload.use_online_search,
+        # The chat path is latency-sensitive; callers can still explicitly
+        # override these models, while DashScope defaults to the Flash tier.
+        analysis_model=fast_analysis_model,
+        rerank_model=payload.rerank_model,
+        answer_model=fast_answer_model,
+        evaluation_model=payload.evaluation_model,
+        online_search_model=payload.online_search_model,
+        prompt_profile=payload.prompt_profile,
+        prompt_overrides=payload.prompt_overrides,
+        conversation_history=previous_messages,
+        case_memory=session.get("case_memory") or {},
+        skip_rerank=payload.skip_rerank,
+    )
+    try:
+        async with runtime.semaphore:
+            result = await asyncio.to_thread(_run_query, query)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        LOGGER.exception("Chat message failed: session=%s client=%s", session_id, request.client.host if request.client else "unknown")
+        raise HTTPException(status_code=502, detail=f"多轮问答失败：{exc}") from exc
+
+    analysis = result.get("analysis") or {}
+    case_memory = _merge_case_memory(session.get("case_memory") or {}, analysis)
+    compact_result = {
+        "intent": result.get("intent"),
+        "analysis": analysis,
+        "contexts": result.get("contexts") or [],
+        "follow_up_questions": result.get("follow_up_questions") or [],
+        "risk_notice": result.get("risk_notice") or "",
+        "timings_sec": result.get("timings_sec") or {},
+    }
+    assistant_message = await asyncio.to_thread(
+        chat_store.append_message,
+        session_id,
+        "assistant",
+        result.get("answer") or "未生成回答。",
+        compact_result,
+        None,
+        case_memory,
+    )
+    updated_session = await asyncio.to_thread(chat_store.get_session, session_id)
+    return {"session": updated_session, "message": assistant_message, "result": result, "case_memory": case_memory}
 
 
 @app.post("/api/compare")

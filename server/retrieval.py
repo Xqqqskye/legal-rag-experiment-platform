@@ -1,4 +1,8 @@
-"""Run one live BM25 + BGE + RRF + semantic-rerank query."""
+"""Legacy BGE CLI kept for historical A/B experiments.
+
+The live Demo imports :mod:`server.qwen37_retrieval` and does not use this
+module. Keep this file only so old BGE comparison commands remain reproducible.
+"""
 
 from __future__ import annotations
 
@@ -19,14 +23,14 @@ load_dotenv(ROOT / ".env", override=False)
 def retrieve(es: Elasticsearch, model: SentenceTransformer, query: str) -> tuple[list[dict], list[dict]]:
     topk = int(os.getenv("BM25_TOPK", "10"))
     bm25 = es.search(
-        index=os.getenv("ES_BM25_INDEX", "law_bm25"),
+        index=os.getenv("ES_BM25_INDEX", "law_bm25_latest"),
         size=topk,
         query={"multi_match": {"query": query, "fields": ["title^1.5", "text"]}},
     )["hits"]["hits"]
 
     vector = model.encode(query, normalize_embeddings=True).tolist()
     dense = es.search(
-        index=os.getenv("ES_BGE_LARGE_INDEX", "law_bge_large"),
+        index=os.getenv("ES_BGE_LARGE_INDEX", "law_bge_m3_latest"),
         knn={
             "field": os.getenv("ES_VECTOR_FIELD", "vector"),
             "query_vector": vector,
@@ -82,7 +86,7 @@ def main() -> int:
     if not es.ping():
         raise RuntimeError("Elasticsearch is not reachable")
 
-    model_path = os.getenv("BGE_LARGE_MODEL", "BAAI/bge-large-zh-v1.5")
+    model_path = os.getenv("BGE_LARGE_MODEL", "BAAI/bge-m3")
     model = SentenceTransformer(model_path, device=os.getenv("EMB_DEVICE", "cpu"))
     bm25, dense = retrieve(es, model, retrieval_query)
     ranked = semantic_rerank(model, retrieval_query, rrf_candidates(bm25, dense))

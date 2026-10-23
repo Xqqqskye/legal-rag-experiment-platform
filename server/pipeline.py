@@ -12,9 +12,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
 from openai import OpenAI
-from sentence_transformers import SentenceTransformer
 
-from server.retrieval import retrieve, rrf_candidates
+from server.qwen37_retrieval import Qwen37APIEmbedder, retrieve, retrieve_cases, rrf_candidates
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -136,6 +135,7 @@ def _pack_candidates(candidates: list[dict]) -> list[dict]:
                 "id": index,
                 "title": item["title"],
                 "text": item["text"][:1000],
+                "corpus": item.get("corpus", "law"),
                 "retrieval_ranks": item["ranks"],
             }
         )
@@ -219,11 +219,12 @@ def main() -> int:
     else:
         retrieval_query = str(analysis.get("rewrite_query") or args.query)
         es = Elasticsearch(os.getenv("ES_URL", "http://127.0.0.1:9200"), request_timeout=30)
-        embedder = SentenceTransformer(os.environ["BGE_LARGE_MODEL"], device=os.getenv("EMB_DEVICE", "cpu"))
+        embedder = Qwen37APIEmbedder()
         after_model_load = time.perf_counter()
         bm25, dense = retrieve(es, embedder, retrieval_query)
+        case_dense = retrieve_cases(embedder, retrieval_query)
         after_retrieval = time.perf_counter()
-        candidates = rrf_candidates(bm25, dense, int(os.getenv("RRF_K", "60")))
+        candidates = rrf_candidates(bm25, dense, case_dense, int(os.getenv("RRF_K", "60")))
         after_rrf = time.perf_counter()
         answer = rerank_and_answer(client, model_name, args.query, analysis, candidates)
         after_answer = time.perf_counter()

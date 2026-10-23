@@ -156,6 +156,11 @@
   .score-fill { height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, #0d9488); }
   .selected-tag { background: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 999px; font-weight: 700; }
   .context-box { background: #f8fafc; border: 1px solid #dbe3ec; border-radius: 10px; padding: 12px; font-size: 13px; white-space: pre-wrap; max-height: 260px; overflow: auto; }
+  .evidence-list { display: grid; gap: 8px; max-height: 420px; overflow: auto; padding: 2px; }
+  .evidence-card { border: 1px solid #dbe3ec; border-radius: 10px; padding: 10px 12px; background: #fbfdff; scroll-margin-top: 16px; }
+  .evidence-card:target { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+  .evidence-card h5 { margin: 0 0 6px; color: #173b70; font-size: 13px; }
+  .evidence-card p { margin: 0; white-space: pre-wrap; line-height: 1.6; font-size: 13px; }
   .answer-box { border-left: 4px solid #0d9488; background: #f0fdfa; border-radius: 0 10px 10px 0; padding: 15px 16px; font-size: 14px; white-space: pre-line; }
   .answer-warning { margin-top: 10px; padding: 9px 11px; border-radius: 8px; background: #fffbeb; color: #92400e; font-size: 12px; }
   .evaluation-head { display: grid; grid-template-columns: 140px 1fr; gap: 16px; align-items: center; margin-bottom: 14px; }
@@ -179,6 +184,30 @@
   .mode-view.hidden { display: none; }
   .experiment-shell { margin-top: 18px; }
   .experiment-intro { margin-bottom: 14px; color: var(--text-2); font-size: 14px; }
+  .chat-layout { display: grid; grid-template-columns: 260px 1fr; gap: 14px; margin-top: 18px; }
+  .chat-sidebar, .chat-main { background: #fff; border: 1px solid var(--border); border-radius: 13px; padding: 14px; }
+  .chat-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 12px; }
+  .chat-toolbar h2, .chat-main h2 { font-size: 17px; }
+  .chat-session-list { display: grid; gap: 7px; max-height: 620px; overflow-y: auto; }
+  .chat-session { width: 100%; text-align: left; border: 1px solid var(--border); background: #fafbfc; border-radius: 9px; padding: 9px 10px; cursor: pointer; font: inherit; color: var(--text); }
+  .chat-session:hover, .chat-session.active { border-color: var(--primary); background: var(--primary-soft); }
+  .chat-session strong { display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .chat-session small { display: block; color: var(--text-2); font-size: 11px; margin-top: 3px; }
+  .chat-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; border-bottom: 1px solid var(--border); padding-bottom: 11px; }
+  .chat-header-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+  .chat-memory { margin: 10px 0; padding: 10px 12px; background: #f0fdfa; border: 1px solid #ccfbf1; border-radius: 9px; color: #115e59; font-size: 12px; white-space: pre-wrap; max-height: 280px; overflow: auto; }
+  .chat-memory.hidden { display: none; }
+  .chat-messages { min-height: 360px; max-height: 620px; overflow-y: auto; display: grid; gap: 11px; padding: 14px 2px; }
+  .chat-message { max-width: 88%; padding: 10px 12px; border-radius: 11px; white-space: pre-wrap; font-size: 14px; }
+  .chat-message.user { justify-self: end; color: #fff; background: #172b55; }
+  .chat-message.assistant { justify-self: start; border: 1px solid var(--border); background: #f8fafc; }
+  .chat-message .chat-meta { display: block; margin-top: 5px; color: var(--text-2); font-size: 11px; }
+  .chat-message.user .chat-meta { color: #bfdbfe; }
+  .chat-compose { display: grid; grid-template-columns: 1fr 96px; gap: 9px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .chat-compose textarea { min-height: 72px; resize: vertical; border: 1px solid #d2dce9; border-radius: 9px; padding: 10px; font: inherit; }
+  .chat-compose button { border: 0; border-radius: 9px; background: var(--primary); color: #fff; font: inherit; font-weight: 700; cursor: pointer; }
+  .chat-compose button:disabled { opacity: .6; cursor: wait; }
+  @media (max-width: 760px) { .chat-layout { grid-template-columns: 1fr; } .chat-session-list { max-height: 180px; } .chat-compose { grid-template-columns: 1fr; } .chat-compose button { min-height: 42px; } }
   .compare-question { width: 100%; min-height: 78px; resize: vertical; padding: 11px 13px; border: 1px solid var(--border); border-radius: 10px; font: inherit; font-size: 16px; }
   .compare-configs, .compare-answer-grid, .badcase-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 13px; }
   .pipeline-config { border: 1px solid var(--border); border-radius: 12px; padding: 14px; background: #f8fafc; }
@@ -267,6 +296,13 @@
   .answer-section-card ol { padding-left: 21px; }
   .answer-section-card li { margin: 5px 0; font-size: 14px; }
   .citation-chip { display: inline-block; margin-left: 5px; border-radius: 5px; padding: 0 5px; background: #e8efff; color: #2457d6; font-size: 11px; font-weight: 800; }
+  a.citation-chip { text-decoration: none; cursor: pointer; }
+  a.citation-chip:hover { background: #cfe0ff; color: #153ea3; text-decoration: underline; }
+  .chat-evidence-list { display: grid; gap: 6px; margin-top: 8px; }
+  .chat-evidence-list details { border: 1px solid #dbe3ec; border-radius: 8px; background: #fff; padding: 6px 9px; scroll-margin-top: 12px; }
+  .chat-evidence-list details:target { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37, 99, 235, .12); }
+  .chat-evidence-list summary { cursor: pointer; color: #2457d6; font-size: 12px; font-weight: 700; }
+  .chat-evidence-list p { margin: 7px 0 0; white-space: pre-wrap; color: var(--text-2); font-size: 12px; line-height: 1.55; }
   @media (max-width: 860px) {
     .chain-steps { grid-template-columns: repeat(2, 1fr); }
     .chain-step::after { display: none; }
@@ -469,13 +505,14 @@
     </div>
   </header>
   <div class="mode-switch" role="tablist" aria-label="工作模式">
-    <button class="mode-btn active" id="singleModeBtn" role="tab" aria-selected="true"><span class="mode-number">01</span>单次问答</button>
-    <button class="mode-btn" id="compareModeBtn" role="tab" aria-selected="false"><span class="mode-number">02</span>A/B 对照实验</button>
-    <button class="mode-btn" id="batchModeBtn" role="tab" aria-selected="false"><span class="mode-number">03</span>批量评测与记录</button>
-    <button class="mode-btn" id="promptModeBtn" role="tab" aria-selected="false"><span class="mode-number">04</span>提示词实验室</button>
+    <button class="mode-btn active" id="chatModeBtn" role="tab" aria-selected="true"><span class="mode-number">01</span>多轮对话</button>
+    <button class="mode-btn" id="singleModeBtn" role="tab" aria-selected="false"><span class="mode-number">02</span>单次问答</button>
+    <button class="mode-btn" id="compareModeBtn" role="tab" aria-selected="false"><span class="mode-number">03</span>A/B 对照实验</button>
+    <button class="mode-btn" id="batchModeBtn" role="tab" aria-selected="false"><span class="mode-number">04</span>批量评测与记录</button>
+    <button class="mode-btn" id="promptModeBtn" role="tab" aria-selected="false"><span class="mode-number">05</span>提示词实验室</button>
   </div>
 
-  <div class="mode-view" id="singleMode">
+  <div class="mode-view hidden" id="singleMode">
 
   <section class="playground" aria-labelledby="playTitle">
     <div class="section-kicker">Live pipeline</div>
@@ -496,8 +533,9 @@
       <label><input type="checkbox" id="useRewrite" checked> 启用 Query 改写</label>
       <label><input type="checkbox" id="runEvaluation" checked> 运行质量评估</label>
       <label><input type="checkbox" id="useOnlineSearch"> 权威法源联网核验（可能增加 30–90 秒）</label>
-      <label>检索策略 <select id="retrieveMode"><option>BM25 + BGE 向量 + RRF</option><option>仅 BM25</option><option>仅 BGE 向量</option></select></label>
+      <label>检索策略 <select id="retrieveMode"><option>BM25 + Qwen3.7 向量 + RRF</option><option>仅 BM25</option><option>仅 Qwen3.7 向量</option></select></label>
       <label>最终上下文 <select id="finalTopK"><option value="3">Top 3</option><option value="5" selected>Top 5</option></select></label>
+      <label><input type="checkbox" id="skipRerank" checked> 直接 RRF（跳过 LLM 重排）</label>
       <label>提示词版本 <select id="singlePromptProfile"><option value="default">默认提示词</option><option value="A">实验室 A</option><option value="B">实验室 B</option></select></label>
     </div>
     <div class="examples" aria-label="示例问题">
@@ -528,6 +566,23 @@
   </section>
   </div>
 
+  <section class="mode-view experiment-shell" id="chatMode">
+    <div class="chat-layout">
+      <aside class="chat-sidebar">
+        <div class="chat-toolbar"><h2>我的会话</h2><button class="secondary-btn" id="newChatSession">新建</button></div>
+        <p class="note">会话和案情记忆保存在本机 SQLite，服务重启后仍可恢复。</p>
+        <div class="chat-session-list" id="chatSessionList"><p class="note">正在加载会话…</p></div>
+      </aside>
+      <main class="chat-main">
+        <div class="chat-header"><div><h2 id="chatTitle">请选择或新建会话</h2><p class="note">当前链路：Qwen3.7 分析 + BM25 / Qwen3.7 向量检索 + 直接 RRF（不调用 LLM 重排）</p></div><div class="chat-header-actions"><button class="secondary-btn" id="toggleChatMemory" aria-expanded="false">案件记忆</button><button class="secondary-btn" id="deleteChatSession">删除会话</button></div></div>
+        <div class="chat-memory hidden" id="chatMemory">尚未记录案件事实。</div>
+        <div class="chat-messages" id="chatMessages"><p class="note">新建会话后开始多轮法律咨询。</p></div>
+        <div class="chat-compose"><textarea id="chatInput" placeholder="继续描述案情，或补充上一轮缺失的事实…"></textarea><button id="sendChatMessage">发送</button></div>
+        <p class="note">多轮上下文会用于处理指代、省略和事实补充；系统仍会把当前问题单独标记为本轮输入。</p>
+      </main>
+    </div>
+  </section>
+
   <section class="mode-view hidden experiment-shell" id="compareMode">
     <div class="card">
       <h2>同题 A/B 对照实验</h2>
@@ -537,7 +592,7 @@
         <div class="pipeline-config">
           <h3>方案 A · Baseline</h3>
           <div class="pipeline-fields">
-            <label>检索策略<select id="cmpARetrieval"><option>仅 BM25</option><option>仅 BGE 向量</option><option>BM25 + BGE 向量 + RRF</option></select></label>
+            <label>检索策略<select id="cmpARetrieval"><option>仅 BM25</option><option>仅 Qwen3.7 向量</option><option>BM25 + Qwen3.7 向量 + RRF</option></select></label>
             <label>最终上下文<select id="cmpATopK"><option value="3">Top 3</option><option value="5" selected>Top 5</option></select></label>
             <label>分析模型<select id="cmpAAnalysis"></select></label>
             <label>重排模型<select id="cmpARerank"></select></label>
@@ -551,7 +606,7 @@
         <div class="pipeline-config">
           <h3>方案 B · Challenger</h3>
           <div class="pipeline-fields">
-            <label>检索策略<select id="cmpBRetrieval"><option>仅 BM25</option><option>仅 BGE 向量</option><option selected>BM25 + BGE 向量 + RRF</option></select></label>
+            <label>检索策略<select id="cmpBRetrieval"><option>仅 BM25</option><option>仅 Qwen3.7 向量</option><option selected>BM25 + Qwen3.7 向量 + RRF</option></select></label>
             <label>最终上下文<select id="cmpBTopK"><option value="3">Top 3</option><option value="5" selected>Top 5</option></select></label>
             <label>分析模型<select id="cmpBAnalysis"></select></label>
             <label>重排模型<select id="cmpBRerank"></select></label>
@@ -604,7 +659,7 @@
         <div class="pipeline-config">
           <h3>方案 A · Baseline</h3>
           <div class="pipeline-fields">
-            <label>检索策略<select id="batchARetrieval"><option>仅 BM25</option><option>仅 BGE 向量</option><option>BM25 + BGE 向量 + RRF</option></select></label>
+            <label>检索策略<select id="batchARetrieval"><option>仅 BM25</option><option>仅 Qwen3.7 向量</option><option>BM25 + Qwen3.7 向量 + RRF</option></select></label>
             <label>最终上下文<select id="batchATopK"><option value="3">Top 3</option><option value="5" selected>Top 5</option></select></label>
             <label>分析模型<select id="batchAAnalysis"></select></label>
             <label>重排模型<select id="batchARerank"></select></label>
@@ -618,7 +673,7 @@
         <div class="pipeline-config">
           <h3>方案 B · Challenger</h3>
           <div class="pipeline-fields">
-            <label>检索策略<select id="batchBRetrieval"><option>仅 BM25</option><option>仅 BGE 向量</option><option selected>BM25 + BGE 向量 + RRF</option></select></label>
+            <label>检索策略<select id="batchBRetrieval"><option>仅 BM25</option><option>仅 Qwen3.7 向量</option><option selected>BM25 + Qwen3.7 向量 + RRF</option></select></label>
             <label>最终上下文<select id="batchBTopK"><option value="3">Top 3</option><option value="5" selected>Top 5</option></select></label>
             <label>分析模型<select id="batchBAnalysis"></select></label>
             <label>重排模型<select id="batchBRerank"></select></label>
@@ -870,18 +925,24 @@ function renderLiveError(message) {
   document.getElementById("retrievalSection").innerHTML = `<div class="answer-warning">请确认 Elasticsearch、FastAPI 和 API Key 均已就绪，然后重试。</div>`;
   ["fusionSection", "rerankSection", "onlineSection", "contextSection", "answerSection", "evaluationSection"].forEach(id => document.getElementById(id).style.display = "none");
 }
-function citationHtml(entry) {
-  const local = (entry.evidence_ids || []).map(id => `<span class="citation-chip">[${Number(id)}]</span>`).join("");
-  const online = (entry.online_evidence_ids || []).map(id => `<span class="citation-chip">[联网${Number(id)}]</span>`).join("");
+function citationHtml(entry, prefix = "evidence") {
+  const local = (entry.evidence_ids || []).map(id => `<a class="citation-chip" href="#${prefix}-${Number(id)}" title="跳转到证据 ${Number(id)}">[${Number(id)}]</a>`).join("");
+  const online = (entry.online_evidence_ids || []).map(id => `<a class="citation-chip" href="#${prefix}-online-${Number(id)}" title="跳转到联网证据 ${Number(id)}">[联网${Number(id)}]</a>`).join("");
   return local + online;
+}
+function linkifyCitations(text, prefix = "evidence") {
+  return escapeHtml(text || "").replace(/\[(联网)?(\d+)\]/g, (match, online, id) => {
+    const target = `${prefix}-${online ? "online-" : ""}${Number(id)}`;
+    return `<a class="citation-chip" href="#${target}" title="跳转到${online ? "联网" : ""}证据 ${Number(id)}">${match}</a>`;
+  });
 }
 function renderStructuredAnswer(data) {
   const structured = data.answer_structured || {};
   const conclusion = structured.conclusion || {};
   const sections = structured.sections || [];
-  if (!conclusion.text && !sections.length) return `<div class="answer-box">${escapeHtml(data.answer || "")}</div>`;
-  const lead = conclusion.text ? `<div class="answer-lead"><strong>初步结论</strong><p>${escapeHtml(conclusion.text)}${citationHtml(conclusion)}</p></div>` : "";
-  const cards = sections.map(section => `<div class="answer-section-card"><h4>${escapeHtml(section.title || "建议")}</h4><ol>${(section.items || []).map(item => `<li>${escapeHtml(item.text || "")}${citationHtml(item)}</li>`).join("")}</ol></div>`).join("");
+  if (!conclusion.text && !sections.length) return `<div class="answer-box">${linkifyCitations(data.answer || "")}</div>`;
+  const lead = conclusion.text ? `<div class="answer-lead"><strong>初步结论</strong><p>${linkifyCitations(conclusion.text)}${citationHtml(conclusion)}</p></div>` : "";
+  const cards = sections.map(section => `<div class="answer-section-card"><h4>${escapeHtml(section.title || "建议")}</h4><ol>${(section.items || []).map(item => `<li>${linkifyCitations(item.text || "")}${citationHtml(item)}</li>`).join("")}</ol></div>`).join("");
   const uncertain = (structured.uncertainties || []).length ? `<div class="answer-section-card"><h4>尚待确认</h4><ol>${structured.uncertainties.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div>` : "";
   return `<div class="answer-structured">${lead}${cards}${uncertain}</div>`;
 }
@@ -902,6 +963,7 @@ async function runInteractive() {
   const useRewrite = document.getElementById("useRewrite").checked;
   const runEvaluation = document.getElementById("runEvaluation").checked;
   const useOnlineSearch = document.getElementById("useOnlineSearch").checked;
+  const skipRerank = document.getElementById("skipRerank").checked;
   const mode = document.getElementById("retrieveMode").value;
   const topK = Number(document.getElementById("finalTopK").value);
   const analysisModel = document.getElementById("analysisModel").value;
@@ -914,7 +976,7 @@ async function runInteractive() {
     const response = await fetch("/api/legal-query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, use_rewrite: useRewrite, retrieval_mode: mode, final_top_k: topK, run_evaluation: runEvaluation, use_online_search: useOnlineSearch, analysis_model: analysisModel, rerank_model: rerankModel, answer_model: answerModel, evaluation_model: evaluationModel, online_search_model: onlineSearchModel, ...promptConfig })
+      body: JSON.stringify({ question, use_rewrite: useRewrite, retrieval_mode: mode, final_top_k: topK, run_evaluation: runEvaluation, use_online_search: useOnlineSearch, skip_rerank: skipRerank, analysis_model: analysisModel, rerank_model: rerankModel, answer_model: answerModel, evaluation_model: evaluationModel, online_search_model: onlineSearchModel, ...promptConfig })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "实时请求失败");
@@ -924,17 +986,18 @@ async function runInteractive() {
       document.getElementById("latency").textContent = `实时完成 · ${Number(data.timings_sec.total || 0).toFixed(2)} 秒`;
       return;
     }
-    const bm25 = data.retrieval.bm25 || [], bge = data.retrieval.bge || [], fusion = data.retrieval.fusion || [];
+    const bm25 = data.retrieval.bm25 || [], qwen37 = data.retrieval.qwen37 || [], cases = data.retrieval.cases_qwen37 || [], fusion = data.retrieval.fusion || [];
     const ranking = data.ranking || [];
     document.getElementById("chainSummary").innerHTML = `
       <div class="summary-cell"><div class="eyebrow">意图路由</div><div class="main">${badge(intent)} → 实时 RAG</div></div>
       <div class="summary-cell"><div class="eyebrow">检索 Query ${data.use_rewrite ? "· 已改写" : "· 原问题"}</div><div class="main">${escapeHtml(data.retrieval_query)}</div></div>
       <div class="summary-cell"><div class="eyebrow">本次模型与提示词</div><div class="main">分析 ${escapeHtml(data.models.analysis)} · 重排 ${escapeHtml(data.models.rerank)}<br>回答 ${escapeHtml(data.models.answer)} · ${escapeHtml((data.prompt_trace || {}).profile || "默认提示词")}${useOnlineSearch ? `<br>联网 ${escapeHtml(data.models.online)}` : ""}${runEvaluation ? `<br>评估 ${escapeHtml(data.models.evaluation)}` : ""}</div></div>`;
     const bm25View = `<div class="retrieval-col"><h4>BM25 关键词召回 · Top ${bm25.length}</h4><div class="retrieval-scroll">${hitList(bm25, "BM25")}</div></div>`;
-    const bgeView = `<div class="retrieval-col"><h4>BGE 语义召回 · Top ${bge.length}</h4><div class="retrieval-scroll">${hitList(bge, "BGE")}</div></div>`;
+    const qwen37View = `<div class="retrieval-col"><h4>Qwen3.7 法条语义召回 · Top ${qwen37.length}</h4><div class="retrieval-scroll">${hitList(qwen37, "Qwen3.7")}</div></div>`;
+    const caseView = cases.length ? `<div class="retrieval-col"><h4>Qwen3.7 案例召回 · Top ${cases.length}</h4><div class="retrieval-scroll">${hitList(cases, "案例")}</div></div>` : "";
     const retrievalBody = mode === "仅 BM25" ? bm25View :
-      mode === "仅 BGE 向量" ? bgeView :
-      `<div class="retrieval-grid">${bm25View}${bgeView}</div>`;
+      mode === "仅 Qwen3.7 向量" ? `<div class="retrieval-grid">${qwen37View}${caseView}</div>` :
+      `<div class="retrieval-grid">${bm25View}${qwen37View}${caseView}</div>`;
     document.getElementById("retrievalSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 3 · 实时初召回</div><h3>${escapeHtml(mode)}</h3></div><p>本次请求实时查询 Elasticsearch</p></div>${retrievalBody}`;
     const fusionItems = fusion.slice(0, 8).map((item, index) => {
       const ranks = Object.entries(item.ranks || {}).map(([k, v]) => `${k} #${v}`).join(" · ");
@@ -944,7 +1007,8 @@ async function runInteractive() {
     const maxScore = Math.max(...ranking.map(x => Number(x.score)), 1);
     const rerankItems = ranking.map((item, index) => `<div class="rerank-item"><div class="rerank-meta"><span class="rank">${index + 1}</span><span class="selected-tag">${escapeHtml(item.applicability || "已选择")}</span><div class="score-track"><div class="score-fill" style="width:${Math.max(5, Number(item.score) / maxScore * 100).toFixed(0)}%"></div></div><span class="score">${Number(item.score).toFixed(0)}</span></div><strong>${escapeHtml(item.title || "未命名法条")}</strong><div class="law-text">${escapeHtml(clipped(item.text, 280))}</div><p class="note">${escapeHtml(item.reason || "")}</p></div>`).join("");
     const trace = (data.prompt_trace || {}).stages || {};
-    document.getElementById("rerankSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 5 · 适用性精排</div><h3>${escapeHtml(data.models.rerank)} 法律适用性重排</h3></div><p>Prompt ${escapeHtml((trace.rerank || {}).version || "—")} · 最终 Top ${ranking.length}</p></div><div class="rerank-list">${rerankItems}</div>`;
+    const rerankLabel = data.rerank_skipped ? "直接 RRF（已跳过 LLM 重排）" : `${escapeHtml(data.models.rerank)} 法律适用性重排`;
+    document.getElementById("rerankSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 5 · ${data.rerank_skipped ? "RRF 直接排序" : "适用性精排"}</div><h3>${rerankLabel}</h3></div><p>${data.rerank_skipped ? "不调用远程重排模型" : `Prompt ${escapeHtml((trace.rerank || {}).version || "—")}`} · 最终 Top ${ranking.length}</p></div><div class="rerank-list">${rerankItems}</div>`;
     const online = data.online_verification || { status: "disabled", official_sources: [] };
     if (online.status === "disabled") {
       document.getElementById("onlineSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 6 · 联网法源核验</div><h3>本次未启用</h3></div></div><p class="note">回答仅使用本地索引，仍需人工核对法规现行效力。</p>`;
@@ -957,7 +1021,7 @@ async function runInteractive() {
         const detailParts = [source.source_type || source.domain || "", source.validity || "", source.effective_date ? `施行 ${source.effective_date}` : "", source.http_status ? `HTTP ${source.http_status}` : ""];
         const detail = detailParts.filter(Boolean).join(" · ");
         const badge = source.verification_status === "official_database_record" ? "国家数据库精确匹配" : "已访问验证";
-        return `<div class="source-item"><div class="source-main"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">[联网${source.id}] ${escapeHtml(label)}</a><span class="source-detail">${escapeHtml(detail)}</span></div><span class="trusted-tag">${escapeHtml(badge)}</span></div>`;
+        return `<div id="evidence-online-${Number(source.id)}" class="source-item"><div class="source-main"><a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">[联网${Number(source.id)}] ${escapeHtml(label)}</a><span class="source-detail">${escapeHtml(detail)}</span></div><span class="trusted-tag">${escapeHtml(badge)}</span></div>`;
       }).join("");
       const stateLabels = { completed: `已核验 ${officialSources.length} 个官方法源`, completed_with_search_degraded: `网页搜索已降级，但国家法律库已核验 ${officialSources.length} 项`, insufficient: "未建立官方法源闭环", timed_out: "联网核验超时，已降级", failed: "联网核验失败，已降级", unsupported: "当前服务商不支持法源链接" };
       const stateText = stateLabels[online.status] || `核验状态：${online.status || "未知"}`;
@@ -965,9 +1029,11 @@ async function runInteractive() {
       const warning = online.error ? `错误：${online.error}` : "搜索摘要不作为法源；只有完成官方域名、跳转链和 HTTP 原文验证的链接才进入回答证据。";
       document.getElementById("onlineSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 6 · 联网法源核验</div><h3>${escapeHtml(stateText)}</h3></div><p>${escapeHtml(meta)}</p></div><div class="context-box">${escapeHtml(online.summary || "暂无联网摘要")}</div>${sourceHtml ? `<div class="source-list">${sourceHtml}</div>` : `<div class="answer-warning">${escapeHtml(warning)}</div>`}`;
     }
-    const context = (data.contexts || []).map((item, index) => `[证据 ${item.id}] ${item.title}\n${item.text}`).join("\n\n");
+    const contexts = data.contexts || [];
+    const context = contexts.map(item => `[证据 ${item.id}] ${item.title}\n${item.text}`).join("\n\n");
     const estimatedTokens = Math.round(context.length / 1.7);
-    document.getElementById("contextSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 7 · 上下文组装</div><h3>按适用性顺序构造证据上下文</h3></div><p>${ranking.length} 条 · 约 ${estimatedTokens} tokens</p></div><div class="context-box">${escapeHtml(context)}</div>`;
+    const evidenceCards = contexts.map(item => `<article id="evidence-${Number(item.id)}" class="evidence-card"><h5>[证据 ${Number(item.id)}] ${escapeHtml(item.title || "未命名证据")} <span class="method-tag">${escapeHtml(item.corpus || "本地语料")}</span></h5><p>${escapeHtml(item.text || "")}</p></article>`).join("");
+    document.getElementById("contextSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 7 · 上下文组装</div><h3>按适用性顺序构造证据上下文</h3></div><p>${contexts.length} 条 · 约 ${estimatedTokens} tokens · 点击回答中的编号可定位</p></div><div class="evidence-list">${evidenceCards || `<div class="context-box">暂无可展示的本地证据</div>`}</div>`;
     const questions = (data.follow_up_questions || []).map(x => `• ${x}`).join("\n");
     const notices = [data.risk_notice, questions ? `需要补充：\n${questions}` : ""].filter(Boolean).join("\n\n");
     document.getElementById("answerSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 8 · 受约束生成</div><h3>${escapeHtml(data.models.answer)} 法律回答</h3></div><p>Prompt ${escapeHtml((trace.answer || {}).version || "—")} · 仅使用最终入选证据</p></div>${renderStructuredAnswer(data)}${notices ? `<div class="answer-warning">${escapeHtml(notices)}</div>` : ""}<div class="answer-warning">仅作技术演示，不构成法律意见。当前离线语料截止 ${escapeHtml(data.corpus_cutoff)}，联网结果仍需打开权威原文核对。</div>`;
@@ -998,8 +1064,115 @@ async function runInteractive() {
     button.textContent = "实时运行";
   }
 }
+let chatSessions = [];
+let activeChatSession = null;
+
+function renderChatSessions() {
+  const node = document.getElementById("chatSessionList");
+  node.innerHTML = chatSessions.map(item => `
+    <button class="chat-session ${activeChatSession && item.id === activeChatSession.id ? "active" : ""}" data-session-id="${escapeHtml(item.id)}">
+      <strong>${escapeHtml(item.title || "新的法律咨询")}</strong>
+      <small>${Number(item.message_count || 0)} 条消息 · ${escapeHtml(String(item.updated_at || "").replace("T", " ").slice(0, 16))}</small>
+    </button>`).join("") || `<p class="note">还没有已保存的会话。</p>`;
+  node.querySelectorAll(".chat-session").forEach(button => button.addEventListener("click", () => loadChatSession(button.dataset.sessionId)));
+}
+
+function renderChatSession(session) {
+  activeChatSession = session;
+  document.getElementById("chatTitle").textContent = session.title || "新的法律咨询";
+  const memory = session.case_memory || {};
+  const memoryText = Object.keys(memory).length ? JSON.stringify(memory, null, 2) : "尚未记录案件事实。";
+  const memoryNode = document.getElementById("chatMemory");
+  memoryNode.textContent = `当前案件记忆\n${memoryText}`;
+  memoryNode.classList.add("hidden");
+  document.getElementById("toggleChatMemory").setAttribute("aria-expanded", "false");
+  const messages = session.messages || [];
+  document.getElementById("chatMessages").innerHTML = messages.map((item, index) => {
+    const result = item.result || {};
+    const intent = result.intent ? `意图：${result.intent}` : "";
+    const timeText = String(item.created_at || "").replace("T", " ").slice(0, 16);
+    if (item.role === "user") return `<div class="chat-message user">${escapeHtml(item.content || "")}<span class="chat-meta">${escapeHtml([timeText, intent].filter(Boolean).join(" · "))}</span></div>`;
+    const prefix = `chat-evidence-${index}`;
+    const contexts = result.contexts || [];
+    const evidence = contexts.map(ctx => `<details id="${prefix}-${Number(ctx.id)}"><summary>[证据 ${Number(ctx.id)}] ${escapeHtml(ctx.title || "未命名证据")}</summary><p>${escapeHtml(ctx.text || "")}</p></details>`).join("");
+    const evidenceHtml = evidence ? `<div class="chat-evidence-list">${evidence}</div>` : "";
+    return `<div class="chat-message assistant">${linkifyCitations(item.content || "", prefix)}${evidenceHtml}<span class="chat-meta">${escapeHtml([timeText, intent].filter(Boolean).join(" · "))}</span></div>`;
+  }).join("") || `<p class="note">新建会话后开始多轮法律咨询。</p>`;
+  const box = document.getElementById("chatMessages");
+  box.scrollTop = box.scrollHeight;
+  renderChatSessions();
+}
+
+async function createChatSession() {
+  const response = await fetch("/api/chat/sessions", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: "新的法律咨询" })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || "会话创建失败");
+  chatSessions = [data, ...chatSessions.filter(item => item.id !== data.id)];
+  renderChatSession(data);
+}
+
+async function loadChatSessions() {
+  const response = await fetch("/api/chat/sessions?limit=30", { cache: "no-store" });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || "会话读取失败");
+  chatSessions = data.sessions || [];
+  renderChatSessions();
+  if (activeChatSession && chatSessions.some(item => item.id === activeChatSession.id)) {
+    await loadChatSession(activeChatSession.id);
+  } else if (chatSessions.length) {
+    await loadChatSession(chatSessions[0].id);
+  } else {
+    await createChatSession();
+  }
+}
+
+async function loadChatSession(sessionId) {
+  const response = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, { cache: "no-store" });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.detail || "会话读取失败");
+  renderChatSession(data);
+}
+
+async function sendChatMessage() {
+  if (!activeChatSession) await createChatSession();
+  const input = document.getElementById("chatInput");
+  const message = input.value.trim();
+  if (!message) { input.focus(); return; }
+  const button = document.getElementById("sendChatMessage");
+  button.disabled = true; button.textContent = "处理中…";
+  try {
+    const response = await fetch(`/api/chat/sessions/${encodeURIComponent(activeChatSession.id)}/messages`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message, retrieval_mode: "BM25 + Qwen3.7 向量 + RRF", final_top_k: 5, run_evaluation: false })
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "多轮问答失败");
+    input.value = "";
+    renderChatSession(data.session);
+    chatSessions = [{ ...data.session, message_count: (data.session.messages || []).length }, ...chatSessions.filter(item => item.id !== data.session.id)];
+    renderChatSessions();
+  } catch (error) {
+    document.getElementById("chatMessages").insertAdjacentHTML("beforeend", `<div class="answer-warning">${escapeHtml(error.message)}</div>`);
+  } finally {
+    button.disabled = false; button.textContent = "发送";
+  }
+}
+
+async function deleteChatSession() {
+  if (!activeChatSession || !confirm("确定删除当前会话及其案情记忆吗？")) return;
+  const response = await fetch(`/api/chat/sessions/${encodeURIComponent(activeChatSession.id)}`, { method: "DELETE" });
+  const data = await response.json();
+  if (!response.ok) { alert(data.detail || "删除失败"); return; }
+  activeChatSession = null;
+  chatSessions = chatSessions.filter(item => item.id !== data.id);
+  if (chatSessions.length) await loadChatSession(chatSessions[0].id); else await createChatSession();
+}
+
 function setMode(mode) {
-  ["single", "compare", "batch", "prompt"].forEach(name => {
+  ["single", "chat", "compare", "batch", "prompt"].forEach(name => {
     document.getElementById(`${name}Mode`).classList.toggle("hidden", name !== mode);
     const button = document.getElementById(`${name}ModeBtn`);
     button.classList.toggle("active", name === mode);
@@ -1009,6 +1182,7 @@ function setMode(mode) {
     loadEvaluationCases();
     loadExperimentHistory();
   }
+  if (mode === "chat") loadChatSessions().catch(error => { document.getElementById("chatMessages").innerHTML = `<div class="answer-warning">${escapeHtml(error.message)}</div>`; });
   if (mode === "prompt") loadPromptCatalog().catch(error => { document.getElementById("promptSaveState").textContent = error.message; });
 }
 function comparisonPipeline(prefix, label) {
@@ -1318,9 +1492,21 @@ document.getElementById("batchAWeb").addEventListener("change", () => { syncOnli
 document.getElementById("batchBWeb").addEventListener("change", () => { syncOnlineModels(); updateBatchEstimate(); });
 ["analysisModel", "rerankModel", "answerModel", "evaluationModel", "onlineModel"].forEach(id => document.getElementById(id).addEventListener("change", () => updateModelHint(id)));
 document.getElementById("singleModeBtn").addEventListener("click", () => setMode("single"));
+document.getElementById("chatModeBtn").addEventListener("click", () => setMode("chat"));
 document.getElementById("compareModeBtn").addEventListener("click", () => setMode("compare"));
 document.getElementById("batchModeBtn").addEventListener("click", () => setMode("batch"));
 document.getElementById("promptModeBtn").addEventListener("click", () => setMode("prompt"));
+document.getElementById("newChatSession").addEventListener("click", () => createChatSession().catch(error => alert(error.message)));
+document.getElementById("sendChatMessage").addEventListener("click", sendChatMessage);
+document.getElementById("deleteChatSession").addEventListener("click", () => deleteChatSession().catch(error => alert(error.message)));
+document.getElementById("toggleChatMemory").addEventListener("click", () => {
+  const memoryNode = document.getElementById("chatMemory");
+  const expanded = memoryNode.classList.toggle("hidden") === false;
+  document.getElementById("toggleChatMemory").setAttribute("aria-expanded", String(expanded));
+});
+document.getElementById("chatInput").addEventListener("keydown", event => {
+  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") sendChatMessage();
+});
 document.getElementById("promptEditorA").addEventListener("input", () => { promptProfiles.A[activePromptStage] = document.getElementById("promptEditorA").value; updatePromptStatus("有未保存修改，可直接用于实验"); });
 document.getElementById("promptEditorB").addEventListener("input", () => { promptProfiles.B[activePromptStage] = document.getElementById("promptEditorB").value; updatePromptStatus("有未保存修改，可直接用于实验"); });
 document.getElementById("resetPromptA").addEventListener("click", () => { promptProfiles.A[activePromptStage] = defaultPrompt(activePromptStage); showPromptStage(activePromptStage); });
@@ -1392,6 +1578,7 @@ document.querySelectorAll(".example-chip").forEach(chip => chip.addEventListener
   runInteractive();
 }));
 loadPromptCatalog().catch(error => { document.getElementById("promptSaveState").textContent = error.message; });
+setMode("chat");
 checkHealth();
 </script>
 </body>

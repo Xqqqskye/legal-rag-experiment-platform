@@ -47,7 +47,7 @@ gitleaks detect --source . --redact
 
 推荐 Description：
 
-> 可观测、可评测的中文法律 RAG 实验平台：支持 BM25+BGE+RRF、LLM 重排、官方法源联网核验、Prompt/模型 A/B 测试、批量评测、成本延迟与 Bad Case 分析。
+> 可观测、可评测的中文法律 RAG 实验平台：支持 BM25+Qwen3.7 向量+RRF、LLM 重排、官方法源联网核验、Prompt/模型 A/B 测试、批量评测、成本延迟与 Bad Case 分析。
 
 推荐 Topics：
 
@@ -58,8 +58,8 @@ gitleaks detect --source . --redact
 先在 GitHub 新建一个空仓库，不要勾选自动生成 README，然后在本地运行：
 
 ```bash
-git remote add origin https://github.com/YOUR_NAME/legal-rag-experiment-platform.git
+git remote add origin https://github.com/Xqqqskye/legal-rag-experiment-platform.git
 git push -u origin main
 ```
 
-推送后把 README 中的 `OWNER/REPOSITORY` 替换为真实路径，并在仓库页面添加 Description 与 Topics。
+推送后在仓库页面确认 Description 与 Topics，并检查 `data/samples/SOURCES.md` 中的法源说明是否与实际发布版本一致。

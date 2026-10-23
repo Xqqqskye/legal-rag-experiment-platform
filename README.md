@@ -9,7 +9,7 @@
 ## 核心能力
 
 - 意图识别与 Query 改写：保留主体关系、争点和待证明事实，避免把假设写成结论。
-- 混合召回：BM25 Top 10 与 BGE Dense Top 10 并行召回。
+- 混合召回：BM25 Top 10、Qwen3.7 法条 Dense Top 10 与案例 Dense Top 8 并行召回。
 - 候选融合：RRF 去重融合，默认保留 Top 20 进入重排。
 - 法律适用性重排：LLM 根据主体、构成要件、请求权和程序筛选最终 Top 5。
 - 联网法源核验：搜索候选法源，并对全国人大国家法律法规数据库做精确名称匹配；只有通过官方数据库精确核验的记录进入 `official_sources`。
@@ -17,6 +17,8 @@
 - 质量评估：逐主张检查引用支持度，并记录综合评分、成本、延迟和 Bad Case。
 - Prompt 与模型对比：五个阶段的 Prompt 可见、可修改；同一问题可做 A/B 对照。
 - 批量实验：内置评测样例，实验配置和逐题结果持久化到本地 SQLite。
+- 多轮法律对话：会话、消息和结构化案情记忆持久化到 `output/evaluation/chat.sqlite3`，服务重启后可恢复；当前问题仍会单独标记，避免把历史消息误当成新指令。
+- 低延迟对话路径：多轮对话默认使用 BM25 + Qwen3.7 向量的 RRF 直接排序，不调用 LLM 重排；单次问答页可通过“直接 RRF”开关选择同一策略。
 
 页面中的成本是按代码内价格快照计算的估算值，不是供应商账单；发布前应根据控制台价格更新费率和 `MODEL_PRICING_SNAPSHOT_DATE`。
 
@@ -25,7 +27,7 @@
 ```text
 用户问题
   -> 意图识别 / Query 改写
-  -> BM25 Top 10 + BGE Top 10
+  -> BM25 Top 10 + Qwen3.7 法条 Top 10 + Qwen3.7 案例 Top 8
   -> RRF 去重融合 Top 20
   -> LLM 法律适用性重排 Top 5
   -> 官方法源联网核验（可选）
@@ -42,10 +44,10 @@
 |---|---|---|
 | 意图识别、改写 | `qwen3.8-flash` | 结构化任务优先低延迟与成本 |
 | 法条重排 | `qwen3.7-plus` | 需要更强的法律适用性判断 |
-| 最终回答 | `qwen3.7-plus` | 在质量、速度和成本之间取平衡 |
+| 最终回答 | `qwen3.8-flash` | 默认低延迟回答；可在前端切换到更强但更慢的模型 |
 | 质量评估 | `qwen3.8-max` | Judge 应尽量强于生成模型，减少漏判 |
 | 联网搜索 | `qwen-flash` | 搜索阶段以检索覆盖与响应速度为主 |
-| 向量模型 | `BAAI/bge-small-zh-v1.5` | 公开样例可在 CPU 运行；正式实验可换 large |
+| 向量模型 | `qwen3.7-text-embedding` | 查询通过同一 DashScope API 编码，法条和案例使用对应的 1024 维本地 FAISS 索引 |
 
 ## 快速启动真实链路
 
@@ -54,8 +56,8 @@
 ### 1. 安装依赖
 
 ```bash
-git clone https://github.com/OWNER/REPOSITORY.git
-cd REPOSITORY
+git clone https://github.com/Xqqqskye/legal-rag-experiment-platform.git
+cd legal-rag-experiment-platform
 python -m venv .venv
 ```
 
@@ -86,6 +88,12 @@ python scripts/index_sample.py
 
 仓库只包含 5 条公开演示样例，用于验证端到端代码。完整实验需要自行准备来源明确、授权允许的法律语料并按相同字段建立索引。
 
+### 数据来源与引用
+
+演示法条片段的来源、适用范围和再分发注意事项见 [`data/samples/SOURCES.md`](data/samples/SOURCES.md)。核心法源核验入口是[全国人大国家法律法规数据库](https://flk.npc.gov.cn/)，回答中应保留法源名称、条号和核验日期。`legal_eval_sample.jsonl` 是项目自编测试样例，不是真实用户数据或第三方数据集。
+
+本工作区的完整 Qwen3.7 FAISS 资产不随 GitHub 仓库提交（文件较大，且元数据可能包含受限法源）。本地运行完整 Demo 时，需要把 `data/indexes/law_qwen37_api_latest/` 和 `data/indexes/cases_qwen37_api_latest/` 放到工作区对应目录，并在 `.env` 中填写 DashScope API Key。公开仓库中的 `scripts/index_sample.py` 仅用于 5 条公开样例的 Elasticsearch 演示。
+
 ### 3. 启动 Demo
 
 Windows：
@@ -102,19 +110,22 @@ macOS / Linux：
 
 打开 <http://127.0.0.1:8008>。健康检查地址为 <http://127.0.0.1:8008/api/healthz>。
 
+进入页面的“多轮对话”标签即可新建或恢复会话。每轮会把最近消息和案情记忆交给意图分析、检索和回答阶段；会话记录保存在本机，不会自动上传到 GitHub。
+
 ## 配置说明
 
 关键检索参数位于 `.env`：
 
 ```dotenv
 BM25_TOPK=10
-BGE_LARGE_TOPK=10
+QWEN37_LAW_TOPK=10
+QWEN37_CASE_TOPK=8
 RRF_TOPK=20
 RRF_K=60
 RERANK_TOPK_FINAL=5
 ```
 
-这里的含义是两路分别召回 10 条；RRF 按 `chunk_id` 去重后对最多 20 个候选排序；LLM 最终选出不超过 5 条证据。公开样例只有 5 条，因此界面数量会小于上述上限。
+这里的含义是 BM25 召回 10 条、Qwen3.7 法条向量召回 10 条、案例向量召回 8 条；RRF 按 `chunk_id` 去重后排序；LLM 最终选出不超过 5 条证据。案例索引只使用 Qwen3.7 向量，不与 BGE 或 Qwen3-Embedding-8B 向量混用。
 
 ## 历史检索实验快照
 
@@ -139,7 +150,7 @@ RERANK_TOPK_FINAL=5
 
 ```text
 server/                 真实 FastAPI/RAG 后端
-web/                    当前单页实验台
+web/                    当前单页实验台（含单轮、多轮和实验页面）
 scripts/index_sample.py 公开样例索引脚本
 data/samples/           可公开的小样本
 tests/                  不联网单元测试
@@ -147,6 +158,10 @@ training/               QLoRA 实验配置与数据处理脚本
 artifacts/              标明来源的历史实验快照
 docs/                   评测、模型与发布安全说明
 ```
+
+## 哪些内容不能上传
+
+API 接入代码和空白配置模板可以公开；密钥、令牌、私有端点和调用数据不能公开。完整清单见 [GitHub 发布与敏感信息清单](docs/GITHUB_PUBLISHING.md)。仓库的 `.gitignore` 已默认排除 `.env`、模型权重、缓存、私有数据、SQLite 实验库和 Elasticsearch 数据卷，但推送前仍必须做人工复核。
 
 ## 测试
 

@@ -102,7 +102,7 @@ python scripts/index_sample.py
 
 ### 数据来源与引用
 
-演示法条片段的来源、适用范围和再分发注意事项见 [`data/samples/SOURCES.md`](data/samples/SOURCES.md)。核心法源核验入口是[全国人大国家法律法规数据库](https://flk.npc.gov.cn/)，回答中应保留法源名称、条号和核验日期。`legal_eval_sample.jsonl` 是项目自编测试样例，不是真实用户数据或第三方数据集。
+演示法条片段的来源、适用范围和再分发注意事项见 [`data/samples/SOURCES.md`](data/samples/SOURCES.md)。完整法条数据与案例数据均来自 GitHub 上游 [`lttxzmj/chinese-law-corpus`](https://github.com/lttxzmj/chinese-law-corpus)；本地版本、同步日期、记录数和索引状态以工作区的 `data/dataset_manifest.json` 为准。核心法源核验入口是[全国人大国家法律法规数据库](https://flk.npc.gov.cn/)，回答中应保留法源名称、条号和核验日期。`legal_eval_sample.jsonl` 是项目自编测试样例，不是真实用户数据或第三方数据集。
 
 本工作区的完整 Qwen3.7 FAISS 资产不随 GitHub 仓库提交（文件较大，且元数据可能包含受限法源）。本地运行完整 Demo 时，需要把 `data/indexes/law_qwen37_api_latest/` 和 `data/indexes/cases_qwen37_api_latest/` 放到工作区对应目录，并在 `.env` 中填写 DashScope API Key。公开仓库中的 `scripts/index_sample.py` 仅用于 5 条公开样例的 Elasticsearch 演示。
 

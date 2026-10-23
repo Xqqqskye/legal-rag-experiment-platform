@@ -62,4 +62,4 @@ git remote add origin https://github.com/Xqqqskye/legal-rag-experiment-platform.
 git push -u origin main
 ```
 
-推送后在仓库页面确认 Description 与 Topics，并检查 `data/samples/SOURCES.md` 中的法源说明是否与实际发布版本一致。
+推送后在仓库页面确认 Description 与 Topics，并检查 `data/samples/SOURCES.md` 中的法源说明是否与实际发布版本一致。法条和案例的完整上游均为 [`lttxzmj/chinese-law-corpus`](https://github.com/lttxzmj/chinese-law-corpus)；公开发布时应保留该链接，并注明本地语料版本/上游 commit、处理方式和索引生成日期，不要把完整原始数据或向量索引直接提交到仓库。

@@ -16,12 +16,20 @@
 
 ## 完整法条和案例索引
 
-完整 Qwen3.7 FAISS 索引、原始法条/案例文件和聊天数据库不随仓库发布。它们可能包含受限来源、衍生向量或用户输入；使用者应自行确认来源、许可证、个人信息处理和再分发权限。仓库代码只依赖索引的 `index.faiss` 与 `meta.jsonl` 字段约定。
+完整法条和案例原始数据均来自 GitHub 上游仓库 [`lttxzmj/chinese-law-corpus`](https://github.com/lttxzmj/chinese-law-corpus)：
+
+| 数据类型 | 工作区本地数据版本 | 上游来源 | 本项目处理方式 |
+|---|---|---|---|
+| 法条 | `chinese-law-corpus_B_v2_20261018`、`chinese-law-corpus_B_v3_20261020_verified` | [`lttxzmj/chinese-law-corpus`](https://github.com/lttxzmj/chinese-law-corpus) | 清洗和版本核对后，按法条结构递归分块；分别生成 BM25 词法索引和 Qwen3.7 Embedding FAISS 索引 |
+| 案例 | `chinese-law-corpus_cases_latest_20261018`、`chinese-law-corpus_cases_latest_20261020` | [`lttxzmj/chinese-law-corpus`](https://github.com/lttxzmj/chinese-law-corpus) | 保留指导性案例、公报案例原始字段，按案件/章节建立父块，再生成摘要块和原文 child；使用 Qwen3.7 Embedding 案例索引 |
+
+工作区外部清单 `data/dataset_manifest.json` 记录了本地目录、上游 URL、版本日期、记录数和索引状态；发布或复现实验时应以该清单以及上游仓库的具体 commit 为准。该清单不随本 GitHub 仓库发布。完整 Qwen3.7 FAISS 索引、原始法条/案例文件和聊天数据库不随仓库发布。它们可能包含受限来源、衍生向量或用户输入；使用者应自行确认上游 LICENSE/README、个人信息处理和再分发权限。仓库代码只依赖索引的 `index.faiss` 与 `meta.jsonl` 字段约定。
 
 ## 引用建议
 
 引用本 Demo 的代码时，请同时说明：
 
 1. 代码仓库：<https://github.com/Xqqqskye/legal-rag-experiment-platform>
-2. 法源核验入口：<https://flk.npc.gov.cn/>
-3. 使用的语料版本、索引生成日期、嵌入模型和检索配置。
+2. 法条与案例上游仓库：<https://github.com/lttxzmj/chinese-law-corpus>
+3. 法源核验入口：<https://flk.npc.gov.cn/>
+4. 使用的语料版本/上游 commit、索引生成日期、嵌入模型和检索配置。

@@ -34,7 +34,7 @@ from server.pipeline import (
     llm_client,
     rerank_candidates,
 )
-from server.qwen37_retrieval import Qwen37APIEmbedder, retrieve, retrieve_cases, rrf_candidates
+from server.qwen37_retrieval import Qwen37APIEmbedder, retrieve, retrieve_cases_hybrid, rrf_candidates
 from server.experiment_store import ExperimentStore
 from server.chat_store import ChatStore
 from server.online_legal_search import search_official_legal_sources
@@ -647,6 +647,71 @@ def _evaluate_answer(
         }
 
 
+def _canonical_intent(value: Any) -> str:
+    """Normalize bilingual model labels before routing the request."""
+    raw = str(value or "").strip().lower()
+    aliases = {
+        "法律咨询": "legal_consultation",
+        "法律类": "legal_consultation",
+        "法律": "legal_consultation",
+        "法律问题": "legal_consultation",
+        "legal": "legal_consultation",
+        "legal_consultation": "legal_consultation",
+        "违规请求": "harmful_request",
+        "违规类": "harmful_request",
+        "有害请求": "harmful_request",
+        "犯罪": "harmful_request",
+        "harmful": "harmful_request",
+        "harmful_request": "harmful_request",
+        "闲聊": "non_legal",
+        "闲聊类": "non_legal",
+        "非法律": "non_legal",
+        "non_legal": "non_legal",
+        "ambiguous": "ambiguous",
+        "模糊": "ambiguous",
+        "信息不足": "ambiguous",
+        "需要澄清": "ambiguous",
+    }
+    return aliases.get(raw, raw or "ambiguous")
+
+
+def _clarification_result(
+    analysis: dict[str, Any],
+    question: str,
+    models: dict[str, str],
+    prompt_trace: dict[str, Any],
+    started: float,
+) -> dict[str, Any]:
+    """Stop before retrieval when context is genuinely insufficient."""
+    follow_up = [str(item).strip() for item in (analysis.get("missing_facts") or []) if str(item).strip()]
+    if not follow_up:
+        follow_up = ["请补充你要解决的具体事情，以及涉及的主体或事件。"]
+    text = "当前信息不足，暂时无法判断你要咨询的具体法律问题。请补充：" + "；".join(follow_up[:3])
+    return {
+        "mode": "live",
+        "intent": "ambiguous",
+        "analysis": analysis,
+        "retrieval_query": "",
+        "use_rewrite": False,
+        "retrieval_mode": "未进入检索",
+        "rerank_skipped": True,
+        "models": models,
+        "prompt_trace": prompt_trace,
+        "answer": text,
+        "answer_structured": {"conclusion": {"text": text, "evidence_ids": [], "online_evidence_ids": []}, "sections": [], "uncertainties": [], "follow_up_questions": follow_up[:3], "risk_notice": ""},
+        "retrieval": {"bm25": [], "qwen37": [], "cases_bm25": [], "cases_qwen37": [], "fusion": []},
+        "ranking": [],
+        "contexts": [],
+        "follow_up_questions": follow_up[:3],
+        "risk_notice": "",
+        "evaluation": {"status": "not_applicable"},
+        "online_verification": {"status": "not_applicable", "sources": []},
+        "cost": _cost_summary({"analysis": 0}),
+        "timings_sec": {"analysis": round(time.perf_counter() - started, 3), "total": round(time.perf_counter() - started, 3)},
+        "corpus_cutoff": os.getenv("CORPUS_CUTOFF", "2022-06-24"),
+    }
+
+
 def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
     if not runtime.ready:
         raise RuntimeError(runtime.error or "实时检索服务尚未就绪")
@@ -666,9 +731,23 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
     analysis = analyze_query(runtime.client, analysis_model, effective_question, prompts["analysis"])
     analysis_usage = _usage_view(analysis.pop("_usage", None))
     after_analysis = time.perf_counter()
-    intent = str(analysis.get("intent") or "未知")
+    intent = _canonical_intent(analysis.get("intent"))
 
-    if intent != "法律咨询":
+    # The model must first decide whether the current utterance is complete.
+    # Only unresolved incompleteness should stop the retrieval chain; ordinary
+    # legal questions may still omit details that can be requested after retrieval.
+    needs_context = bool(analysis.get("needs_context"))
+    context_resolution = str(analysis.get("context_resolution") or "").strip().lower()
+    if intent == "ambiguous" or (needs_context and context_resolution not in {"resolved", "已补全", "resolved_context"}):
+        return _clarification_result(
+            analysis,
+            payload.question,
+            {"analysis": analysis_model, "rerank": rerank_model, "answer": answer_model, "evaluation": evaluation_model, "online": online_search_model},
+            prompt_trace,
+            started,
+        )
+
+    if intent != "legal_consultation":
         return {
             "mode": "live",
             "intent": intent,
@@ -676,7 +755,7 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
             "models": {"analysis": analysis_model, "rerank": rerank_model, "answer": answer_model, "evaluation": evaluation_model, "online": online_search_model},
             "prompt_trace": prompt_trace,
             "answer": "该问题未进入法律检索链路。",
-            "retrieval": {"bm25": [], "qwen37": [], "cases_qwen37": [], "fusion": []},
+            "retrieval": {"bm25": [], "qwen37": [], "cases_bm25": [], "cases_qwen37": [], "fusion": []},
             "ranking": [],
             "contexts": [],
             "follow_up_questions": [],
@@ -692,15 +771,21 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
     retrieval_query = rewrite if payload.use_rewrite and rewrite else payload.question
     use_dense = payload.retrieval_mode != "仅 BM25"
     bm25_hits, dense_hits = retrieve(runtime.es, runtime.embedder, retrieval_query, include_dense=use_dense)
-    case_dense_hits = retrieve_cases(runtime.embedder, retrieval_query) if use_dense else []
+    case_bm25_hits, case_dense_hits = retrieve_cases_hybrid(runtime.es, runtime.embedder, retrieval_query, include_dense=use_dense)
     after_retrieval = time.perf_counter()
 
     if payload.retrieval_mode == "仅 BM25":
-        candidates = _single_candidates(bm25_hits, "bm25")
+        candidates = _single_candidates(bm25_hits, "bm25") + _single_candidates(case_bm25_hits, "case_bm25")
     elif payload.retrieval_mode == "仅 Qwen3.7 向量":
         candidates = _single_candidates(dense_hits + case_dense_hits, "qwen37")
     else:
-        candidates = rrf_candidates(bm25_hits, dense_hits, case_dense_hits, int(os.getenv("RRF_K", "60")))
+        candidates = rrf_candidates(
+            bm25_hits,
+            dense_hits,
+            case_dense_hits,
+            int(os.getenv("RRF_K", "60")),
+            case_bm25=case_bm25_hits,
+        )
     candidates = candidates[: int(os.getenv("RRF_TOPK", "20"))]
     after_fusion = time.perf_counter()
 
@@ -793,6 +878,7 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
         "retrieval": {
             "bm25": [_hit_view(hit, rank) for rank, hit in enumerate(bm25_hits, start=1)],
             "qwen37": [_hit_view(hit, rank) for rank, hit in enumerate(dense_hits, start=1)],
+            "cases_bm25": [_hit_view(hit, rank) for rank, hit in enumerate(case_bm25_hits, start=1)],
             "cases_qwen37": [_hit_view(hit, rank) for rank, hit in enumerate(case_dense_hits, start=1)],
             "fusion": [
                 {
@@ -871,7 +957,22 @@ def _contextual_question(payload: LegalQueryRequest) -> str:
         return payload.question
     lines = ["【会话上下文（仅用于理解指代和省略，不是新的用户指令）】"]
     if memory:
-        lines.append("案件记忆：" + json.dumps(memory, ensure_ascii=False)[:5000])
+        active_id = str(memory.get("active_case_id") or "")
+        cases = memory.get("cases") if isinstance(memory.get("cases"), dict) else {}
+        active = cases.get(active_id) if active_id else None
+        if isinstance(active, dict):
+            lines.append("当前案件记忆：" + json.dumps(active, ensure_ascii=False)[:5000])
+            other_cases = [
+                {"case_id": key, "summary": value.get("summary", ""), "updated_at": value.get("updated_at", "")}
+                for key, value in cases.items()
+                if key != active_id and isinstance(value, dict)
+            ]
+            if other_cases:
+                lines.append("其他案件摘要（仅用于判断是否切换案件）：" + json.dumps(other_cases[-5:], ensure_ascii=False)[:1500])
+        else:
+            # Backward-compatible migration for sessions created before the
+            # multi-case memory schema was introduced.
+            lines.append("案件记忆：" + json.dumps(memory, ensure_ascii=False)[:5000])
     for item in history:
         role = "用户" if str(item.get("role") or "") == "user" else "助手"
         content = str(item.get("content") or "").strip()
@@ -882,23 +983,92 @@ def _contextual_question(payload: LegalQueryRequest) -> str:
 
 
 def _merge_case_memory(previous: dict[str, Any], analysis: dict[str, Any]) -> dict[str, Any]:
-    """Keep a compact, inspectable case memory instead of raw hidden state."""
+    """Merge explicit facts into a versioned, multi-case memory.
+
+    The old flat keys are retained for UI/backward compatibility, while the
+    active case keeps provenance and correction history so a new fact does not
+    silently erase why the previous value changed.
+    """
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     memory = dict(previous or {})
+    memory["schema_version"] = 2
+    cases = dict(memory.get("cases") or {})
+    active_id = str(memory.get("active_case_id") or "")
+    if not active_id:
+        active_id = "case-1"
+    active = dict(cases.get(active_id) or {})
+
+    # Migrate the previous flat representation into the active case once.
+    if not active:
+        legacy_entities = memory.get("entities")
+        if isinstance(legacy_entities, dict) and legacy_entities:
+            active["facts"] = dict(legacy_entities)
+        for key in ("legal_issues", "proof_gaps", "last_intent", "last_rewrite_query"):
+            if memory.get(key):
+                active[key] = memory[key]
+        active["case_id"] = active_id
+
+    action = str(analysis.get("case_action") or "continue").strip().lower()
+    if action in {"new_case", "switch", "new", "切换案件", "新案件"} or bool(analysis.get("new_topic")):
+        next_number = len(cases) + 1
+        active_id = f"case-{next_number}"
+        active = {"case_id": active_id, "facts": {}, "legal_issues": [], "proof_gaps": [], "corrections": []}
+
+    facts = dict(active.get("facts") or active.get("entities") or {})
+    provenance = dict(active.get("fact_provenance") or {})
+    conflicts = list(memory.get("conflicts") or [])
     entities = analysis.get("entities")
     if isinstance(entities, dict):
-        merged = dict(memory.get("entities") or {})
-        merged.update({str(key): value for key, value in entities.items() if value not in (None, "", [], {})})
-        if merged:
-            memory["entities"] = merged
-    for key in ("legal_issues", "proof_gaps"):
+        for key, value in entities.items():
+            key = str(key)
+            if value in (None, "", [], {}):
+                continue
+            old_value = facts.get(key)
+            if old_value not in (None, "", [], {}) and old_value != value:
+                conflicts.append({"case_id": active_id, "field": key, "old": old_value, "new": value, "resolved_at": now})
+            facts[key] = value
+            provenance[key] = {"source": "user_current_turn", "updated_at": now}
+
+    corrections = analysis.get("corrections")
+    if isinstance(corrections, dict):
+        for key, value in corrections.items():
+            key = str(key)
+            if value in (None, "", [], {}):
+                continue
+            old_value = facts.get(key)
+            if old_value not in (None, "", [], {}) and old_value != value:
+                conflicts.append({"case_id": active_id, "field": key, "old": old_value, "new": value, "resolved_at": now, "type": "user_correction"})
+            facts[key] = value
+            provenance[key] = {"source": "user_correction", "updated_at": now}
+
+    active["case_id"] = active_id
+    active["facts"] = facts
+    active["entities"] = facts  # compatibility with the existing memory panel
+    active["fact_provenance"] = provenance
+    for key in ("legal_issues", "proof_gaps", "missing_facts"):
         values = analysis.get(key)
-        if isinstance(values, list) and values:
-            memory[key] = values[:20]
-    if analysis.get("intent"):
-        memory["last_intent"] = str(analysis["intent"])
+        if isinstance(values, list):
+            active[key] = [str(item) for item in values if str(item).strip()][:20]
+    active["last_intent"] = _canonical_intent(analysis.get("intent"))
+    active["is_complete"] = bool(analysis.get("is_complete", True))
+    active["needs_context"] = bool(analysis.get("needs_context", False))
+    active["context_resolution"] = str(analysis.get("context_resolution") or "not_needed")
     if analysis.get("rewrite_query"):
-        memory["last_rewrite_query"] = str(analysis["rewrite_query"])[:600]
-    memory["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+        active["last_rewrite_query"] = str(analysis["rewrite_query"])[:600]
+    active["summary"] = str(analysis.get("case_summary") or active.get("summary") or "")[:600]
+    active["updated_at"] = now
+    cases[active_id] = active
+
+    memory["active_case_id"] = active_id
+    memory["cases"] = cases
+    memory["entities"] = facts
+    memory["legal_issues"] = active.get("legal_issues", [])
+    memory["proof_gaps"] = active.get("proof_gaps", [])
+    memory["missing_facts"] = active.get("missing_facts", [])
+    memory["last_intent"] = active["last_intent"]
+    memory["last_rewrite_query"] = active.get("last_rewrite_query", "")
+    memory["conflicts"] = conflicts[-30:]
+    memory["updated_at"] = now
     return memory
 
 
@@ -988,21 +1158,22 @@ def _run_comparison(payload: CompareRequest) -> dict[str, Any]:
 
 def _benchmark_run(case: dict[str, Any], result: dict[str, Any]) -> dict[str, Any]:
     expected_intent = str(case.get("expected_intent") or "法律咨询")
-    actual_intent = str(result.get("intent") or "")
-    intent_match = actual_intent == expected_intent
+    expected_intent_canonical = _canonical_intent(expected_intent)
+    actual_intent = _canonical_intent(result.get("intent"))
+    intent_match = actual_intent == expected_intent_canonical
     expected_laws = [str(value).strip() for value in case.get("expected_laws") or [] if str(value).strip()]
     retrieved_titles = [str(item.get("title") or "") for item in result.get("ranking") or []]
     matched_laws = [
         law for law in expected_laws
         if any(law.lower() in title.lower() or title.lower() in law.lower() for title in retrieved_titles if title)
     ]
-    law_recall = len(matched_laws) / len(expected_laws) if expected_laws else (1.0 if actual_intent != "法律咨询" else None)
+    law_recall = len(matched_laws) / len(expected_laws) if expected_laws else (1.0 if actual_intent != "legal_consultation" else None)
     evaluation = result.get("evaluation") or {}
     score = evaluation.get("overall_score")
     audit = evaluation.get("citation_audit") or {}
-    citation_valid = bool(audit.get("valid")) if actual_intent == "法律咨询" else True
+    citation_valid = bool(audit.get("valid")) if actual_intent == "legal_consultation" else True
     threshold = float(case.get("quality_threshold") or 0)
-    if expected_intent != "法律咨询":
+    if expected_intent_canonical != "legal_consultation":
         passed = intent_match
     else:
         passed = bool(intent_match and score is not None and float(score) >= threshold and (law_recall is None or law_recall >= 0.5) and citation_valid)
@@ -1012,7 +1183,7 @@ def _benchmark_run(case: dict[str, Any], result: dict[str, Any]) -> dict[str, An
     if expected_laws and (law_recall or 0) < 1:
         missed = [law for law in expected_laws if law not in matched_laws]
         failures.append("未命中期望法源：" + "、".join(missed))
-    if score is None and expected_intent == "法律咨询":
+    if score is None and expected_intent_canonical == "legal_consultation":
         failures.append("没有可用的自动质量分")
     elif score is not None and float(score) < threshold:
         failures.append(f"质量分 {float(score):.1f} 低于阈值 {threshold:.0f}")
@@ -1020,7 +1191,7 @@ def _benchmark_run(case: dict[str, Any], result: dict[str, Any]) -> dict[str, An
         failures.append("引用闭环未通过")
     return {
         "passed": passed,
-        "expected_intent": expected_intent,
+        "expected_intent": expected_intent_canonical,
         "actual_intent": actual_intent,
         "intent_match": intent_match,
         "expected_laws": expected_laws,

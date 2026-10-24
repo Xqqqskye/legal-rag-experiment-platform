@@ -14,7 +14,7 @@ from elasticsearch import Elasticsearch
 import httpx
 from openai import OpenAI
 
-from server.qwen37_retrieval import Qwen37APIEmbedder, retrieve, retrieve_cases, rrf_candidates
+from server.qwen37_retrieval import Qwen37APIEmbedder, retrieve, retrieve_cases_hybrid, rrf_candidates
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,12 +22,21 @@ load_dotenv(ROOT / ".env", override=False)
 
 
 DEFAULT_PROMPTS = {
-    "analysis": """你是中国法律检索系统的查询分析器。只输出 JSON，不直接回答案件。
-输出字段：intent（法律咨询/闲聊/违规请求）、rewrite_query、legal_issues（字符串数组）、
+    "analysis": """你是中国法律检索系统的多轮查询分析器。只输出 JSON，不直接回答案件。
+先判断“当前用户句子是否语义完整”，再决定是否需要上下文：
+1. 当前句完整：在 legal_consultation、harmful_request、non_legal 三类中选择一级意图；
+2. 当前句不完整：查看会话历史和案件记忆，能补全就使用补全后的语义继续分类；仍不能补全时，intent=ambiguous、needs_context=true，并生成最少的追问。
+不要因为普通法律咨询缺少金额、地区等细节就判为 ambiguous；只有连当前要解决的事项都无法确定时才需要追问。
+输出字段：intent（legal_consultation/harmful_request/non_legal/ambiguous）、
+is_complete（布尔值）、needs_context（布尔值）、context_resolution（not_needed/resolved/unresolved）、
+missing_facts（仍需用户补充的关键事实数组）、case_action（continue/new_case/correction/switch/uncertain）、
+rewrite_query、legal_issues（字符串数组）、
 entities（主体关系、行为、损害、时间地点等对象）、urgency（普通/紧急）、
 proof_gaps（仍需证明的关键事实数组）、retrieval_queries（最多4个检索子问题数组）。
 rewrite_query 必须保留主体关系和适用条件，并补充法言法语、可能请求权与证据词，
 但不得虚构用户未提供的事实，不得把待证明事实写成既定事实。
+如果当前句是对上一轮的补充或指代，case_action=continue；如果明确纠正前文，case_action=correction；
+如果切换到另一件事，case_action=switch 或 new_case。只有当前语义已经补全时，needs_context 才能为 false。
 涉及正在发生的人身危险时 urgency=紧急。
 特别注意关系边界：用户只说男朋友/女朋友时，不得直接改写成婚姻关系或家庭暴力；
 应优先按一般人身侵权、故意伤害/治安违法检索。只有用户明确共同生活等事实时，
@@ -231,7 +240,7 @@ def main() -> int:
     after_client = time.perf_counter()
     analysis = analyze_query(client, model_name, args.query)
     after_analysis = time.perf_counter()
-    if analysis.get("intent") != "法律咨询":
+    if str(analysis.get("intent") or "").strip().lower() not in {"法律咨询", "法律类", "legal", "legal_consultation"}:
         result = {"provider": provider, "model": model_name, "analysis": analysis, "answer": "该问题未进入法律检索链路。"}
     else:
         retrieval_query = str(analysis.get("rewrite_query") or args.query)
@@ -239,9 +248,9 @@ def main() -> int:
         embedder = Qwen37APIEmbedder()
         after_model_load = time.perf_counter()
         bm25, dense = retrieve(es, embedder, retrieval_query)
-        case_dense = retrieve_cases(embedder, retrieval_query)
+        case_bm25, case_dense = retrieve_cases_hybrid(es, embedder, retrieval_query)
         after_retrieval = time.perf_counter()
-        candidates = rrf_candidates(bm25, dense, case_dense, int(os.getenv("RRF_K", "60")))
+        candidates = rrf_candidates(bm25, dense, case_dense, int(os.getenv("RRF_K", "60")), case_bm25=case_bm25)
         after_rrf = time.perf_counter()
         answer = rerank_and_answer(client, model_name, args.query, analysis, candidates)
         after_answer = time.perf_counter()
@@ -249,7 +258,7 @@ def main() -> int:
             "provider": provider,
             "model": model_name,
             "analysis": analysis,
-            "retrieval": {"bm25_count": len(bm25), "bge_count": len(dense), "rrf_count": len(candidates)},
+            "retrieval": {"bm25_count": len(bm25), "case_bm25_count": len(case_bm25), "qwen37_count": len(dense), "case_qwen37_count": len(case_dense), "rrf_count": len(candidates)},
             "timings_sec": {
                 "client_setup": round(after_client - started, 3),
                 "query_analysis_api": round(after_analysis - after_client, 3),

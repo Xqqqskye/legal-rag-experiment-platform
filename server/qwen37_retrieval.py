@@ -99,8 +99,9 @@ class LocalBM25Index:
 
     TOKEN_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]")
 
-    def __init__(self, documents: list[dict[str, Any]]) -> None:
+    def __init__(self, documents: list[dict[str, Any]], corpus: str = "law") -> None:
         self.documents = documents
+        self.corpus = corpus
         self.term_postings: dict[str, dict[int, int]] = {}
         self.lengths: list[int] = []
         for doc_id, document in enumerate(documents):
@@ -131,7 +132,7 @@ class LocalBM25Index:
         hits: list[dict[str, Any]] = []
         for score, doc_id in heapq.nlargest(max(1, topk), ((score, doc_id) for doc_id, score in scores.items())):
             source = dict(self.documents[doc_id])
-            source.setdefault("corpus", "law")
+            source.setdefault("corpus", self.corpus)
             hits.append({"_id": source.get("chunk_id", str(doc_id)), "_score": float(score), "_source": source})
         return hits
 
@@ -177,6 +178,13 @@ class Qwen37APIEmbedder:
         if self._local_bm25 is None:
             self._local_bm25 = LocalBM25Index(self.law_index.metadata)
         return self._local_bm25
+
+    @property
+    def local_case_bm25(self) -> LocalBM25Index:
+        """Build a separate lexical index for case chunks when ES is absent."""
+        if not hasattr(self, "_local_case_bm25") or self._local_case_bm25 is None:
+            self._local_case_bm25 = LocalBM25Index(self.case_index.metadata, corpus="case")
+        return self._local_case_bm25
 
     def _embed_batch(self, texts: list[str]) -> np.ndarray:
         last_error: Exception | None = None
@@ -259,11 +267,50 @@ def retrieve_cases(model: Qwen37APIEmbedder, query: str) -> list[dict]:
     return model.case_index.search(vector, int(os.getenv("QWEN37_CASE_TOPK", "8")))
 
 
+def retrieve_case_bm25(es: Elasticsearch | None, model: Qwen37APIEmbedder, query: str) -> list[dict]:
+    """Retrieve case chunks lexically from ES or the aligned local fallback."""
+    topk = int(os.getenv("CASE_BM25_TOPK", os.getenv("BM25_TOPK", "10")))
+    if es is not None:
+        try:
+            return es.search(
+                index=os.getenv("ES_CASE_BM25_INDEX", "case_bm25_latest"),
+                size=topk,
+                query={"multi_match": {"query": query, "fields": ["title^1.5", "text"]}},
+            )["hits"]["hits"]
+        except Exception:
+            # A deployment may have Elasticsearch running before the case index
+            # is built. Keep the demo usable and deterministic by falling back
+            # to the aligned local case metadata rather than failing the whole
+            # request; the index-build script can be run later without code
+            # changes.
+            pass
+    return model.local_case_bm25.search(query, topk)
+
+
+def retrieve_cases_hybrid(
+    es: Elasticsearch | None, model: Qwen37APIEmbedder, query: str, include_dense: bool = True
+) -> tuple[list[dict], list[dict]]:
+    """Return (case BM25 hits, case dense hits) using the same query encoder."""
+    case_bm25 = retrieve_case_bm25(es, model, query)
+    case_dense = retrieve_cases(model, query) if include_dense else []
+    return case_bm25, case_dense
+
+
 def rrf_candidates(
-    bm25: list[dict], dense: list[dict], case_dense: list[dict] | None = None, rrf_k: int = 60
+    bm25: list[dict],
+    dense: list[dict],
+    case_dense: list[dict] | None = None,
+    rrf_k: int = 60,
+    *,
+    case_bm25: list[dict] | None = None,
 ) -> list[dict]:
     combined: dict[str, dict] = {}
-    streams = (("bm25", bm25), ("qwen37", dense), ("case_qwen37", case_dense or []))
+    streams = (
+        ("bm25", bm25),
+        ("qwen37", dense),
+        ("case_bm25", case_bm25 or []),
+        ("case_qwen37", case_dense or []),
+    )
     for source_name, hits in streams:
         for rank, hit in enumerate(hits, start=1):
             source = hit.get("_source", {})
@@ -274,7 +321,7 @@ def rrf_candidates(
                     "chunk_id": key,
                     "title": source.get("title", ""),
                     "text": source.get("text", ""),
-                    "corpus": source.get("corpus") or ("case" if source_name == "case_qwen37" else "law"),
+                    "corpus": source.get("corpus") or ("case" if source_name.startswith("case_") else "law"),
                     "ranks": {},
                     "rrf": 0.0,
                 },

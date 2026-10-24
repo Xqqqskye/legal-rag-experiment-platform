@@ -574,7 +574,7 @@
         <div class="chat-session-list" id="chatSessionList"><p class="note">正在加载会话…</p></div>
       </aside>
       <main class="chat-main">
-        <div class="chat-header"><div><h2 id="chatTitle">请选择或新建会话</h2><p class="note">当前链路：Qwen3.7 分析 + BM25 / Qwen3.7 向量检索 + 直接 RRF（不调用 LLM 重排）</p></div><div class="chat-header-actions"><button class="secondary-btn" id="toggleChatMemory" aria-expanded="false">案件记忆</button><button class="secondary-btn" id="deleteChatSession">删除会话</button></div></div>
+        <div class="chat-header"><div><h2 id="chatTitle">请选择或新建会话</h2><p class="note">当前链路：语义完整性判断 + Qwen3.7 分析 + 法条/案例 BM25 与向量混合检索 + 直接 RRF（不调用 LLM 重排）</p></div><div class="chat-header-actions"><button class="secondary-btn" id="toggleChatMemory" aria-expanded="false">案件记忆</button><button class="secondary-btn" id="deleteChatSession">删除会话</button></div></div>
         <div class="chat-memory hidden" id="chatMemory">尚未记录案件事实。</div>
         <div class="chat-messages" id="chatMessages"><p class="note">新建会话后开始多轮法律咨询。</p></div>
         <div class="chat-compose"><textarea id="chatInput" placeholder="继续描述案情，或补充上一轮缺失的事实…"></textarea><button id="sendChatMessage">发送</button></div>
@@ -835,7 +835,7 @@ function hitList(items, label) {
   }).join("");
 }
 function renderNonLegal(question, intent) {
-  const isIllegal = intent === "违规类";
+  const isIllegal = intent === "违规类" || intent === "harmful_request";
   document.getElementById("chainSummary").innerHTML = `
     <div class="summary-cell"><div class="eyebrow">意图</div><div class="main">${badge(intent)}</div></div>
     <div class="summary-cell"><div class="eyebrow">路由结果</div><div class="main">${isIllegal ? "安全拒答，不进入检索" : "通用对话，不进入法律知识库"}</div></div>
@@ -847,7 +847,10 @@ function renderNonLegal(question, intent) {
   document.getElementById("chainPanel").classList.add("show");
 }
 function intentForDisplay(intent) {
-  return intent === "法律咨询" ? "法律类" : intent === "违规请求" ? "违规类" : intent === "闲聊" ? "闲聊类" : intent;
+  return intent === "法律咨询" || intent === "法律类" || intent === "legal_consultation" ? "法律类" :
+    intent === "违规请求" || intent === "违规类" || intent === "harmful_request" ? "违规类" :
+    intent === "闲聊" || intent === "闲聊类" || intent === "non_legal" ? "闲聊类" :
+    intent === "ambiguous" ? "信息不足" : intent;
 }
 function setServiceStatus(state, text) {
   const node = document.getElementById("serviceStatus");
@@ -981,12 +984,19 @@ async function runInteractive() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "实时请求失败");
     const intent = intentForDisplay(data.intent);
+    if (intent === "信息不足") {
+      document.getElementById("chainSummary").innerHTML = `<div class="summary-cell"><div class="eyebrow">意图</div><div class="main">信息不足，需要补充上下文</div></div><div class="summary-cell"><div class="eyebrow">处理策略</div><div class="main">未进入法律检索</div></div>`;
+      document.getElementById("retrievalSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">链路已暂停</div><h3>${escapeHtml(data.answer || "请补充案件事实")}</h3></div></div><div class="answer-section-card"><h4>需要补充</h4><ol>${(data.follow_up_questions || []).map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ol></div>`;
+      ["fusionSection", "rerankSection", "onlineSection", "contextSection", "answerSection", "evaluationSection"].forEach(id => document.getElementById(id).style.display = "none");
+      document.getElementById("latency").textContent = `已完成上下文判断 · ${Number(data.timings_sec.total || 0).toFixed(2)} 秒`;
+      return;
+    }
     if (intent !== "法律类") {
       renderNonLegal(question, intent);
       document.getElementById("latency").textContent = `实时完成 · ${Number(data.timings_sec.total || 0).toFixed(2)} 秒`;
       return;
     }
-    const bm25 = data.retrieval.bm25 || [], qwen37 = data.retrieval.qwen37 || [], cases = data.retrieval.cases_qwen37 || [], fusion = data.retrieval.fusion || [];
+    const bm25 = data.retrieval.bm25 || [], qwen37 = data.retrieval.qwen37 || [], casesBm25 = data.retrieval.cases_bm25 || [], cases = data.retrieval.cases_qwen37 || [], fusion = data.retrieval.fusion || [];
     const ranking = data.ranking || [];
     document.getElementById("chainSummary").innerHTML = `
       <div class="summary-cell"><div class="eyebrow">意图路由</div><div class="main">${badge(intent)} → 实时 RAG</div></div>
@@ -994,10 +1004,11 @@ async function runInteractive() {
       <div class="summary-cell"><div class="eyebrow">本次模型与提示词</div><div class="main">分析 ${escapeHtml(data.models.analysis)} · 重排 ${escapeHtml(data.models.rerank)}<br>回答 ${escapeHtml(data.models.answer)} · ${escapeHtml((data.prompt_trace || {}).profile || "默认提示词")}${useOnlineSearch ? `<br>联网 ${escapeHtml(data.models.online)}` : ""}${runEvaluation ? `<br>评估 ${escapeHtml(data.models.evaluation)}` : ""}</div></div>`;
     const bm25View = `<div class="retrieval-col"><h4>BM25 关键词召回 · Top ${bm25.length}</h4><div class="retrieval-scroll">${hitList(bm25, "BM25")}</div></div>`;
     const qwen37View = `<div class="retrieval-col"><h4>Qwen3.7 法条语义召回 · Top ${qwen37.length}</h4><div class="retrieval-scroll">${hitList(qwen37, "Qwen3.7")}</div></div>`;
-    const caseView = cases.length ? `<div class="retrieval-col"><h4>Qwen3.7 案例召回 · Top ${cases.length}</h4><div class="retrieval-scroll">${hitList(cases, "案例")}</div></div>` : "";
-    const retrievalBody = mode === "仅 BM25" ? bm25View :
+    const caseBm25View = casesBm25.length ? `<div class="retrieval-col"><h4>BM25 案例召回 · Top ${casesBm25.length}</h4><div class="retrieval-scroll">${hitList(casesBm25, "案例 BM25")}</div></div>` : "";
+    const caseView = cases.length ? `<div class="retrieval-col"><h4>Qwen3.7 案例召回 · Top ${cases.length}</h4><div class="retrieval-scroll">${hitList(cases, "案例向量")}</div></div>` : "";
+    const retrievalBody = mode === "仅 BM25" ? `<div class="retrieval-grid">${bm25View}${caseBm25View}</div>` :
       mode === "仅 Qwen3.7 向量" ? `<div class="retrieval-grid">${qwen37View}${caseView}</div>` :
-      `<div class="retrieval-grid">${bm25View}${qwen37View}${caseView}</div>`;
+      `<div class="retrieval-grid">${bm25View}${qwen37View}${caseBm25View}${caseView}</div>`;
     document.getElementById("retrievalSection").innerHTML = `<div class="flow-head"><div><div class="eyebrow">Step 3 · 实时初召回</div><h3>${escapeHtml(mode)}</h3></div><p>本次请求实时查询 Elasticsearch</p></div>${retrievalBody}`;
     const fusionItems = fusion.slice(0, 8).map((item, index) => {
       const ranks = Object.entries(item.ranks || {}).map(([k, v]) => `${k} #${v}`).join(" · ");

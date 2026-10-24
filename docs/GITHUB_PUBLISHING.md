@@ -47,7 +47,7 @@ gitleaks detect --source . --redact
 
 推荐 Description：
 
-> 面向法律问答研发的中文 RAG 实验平台：支持单轮/多轮案件对话、法条与案例混合检索、BM25+向量+RRF、LLM 重排、证据引用、官方法源核验、批量评测和 Prompt/模型 A/B 实验。
+> 可观测、可评测的中文法律 RAG 工程平台：以案件状态记忆驱动多轮查询理解，支持法条/案例双语义域 BM25+Embedding 混合召回、RRF 与 LLM 适用性重排，提供证据约束生成、官方法源核验、可解释引用、批量评测、延迟/成本观测和 Prompt/模型 A/B 实验。
 
 推荐 Topics：
 
@@ -62,4 +62,8 @@ git remote add origin https://github.com/Xqqqskye/legal-rag-experiment-platform.
 git push -u origin main
 ```
 
-推送后在仓库页面确认 Description 与 Topics，并检查 `data/samples/SOURCES.md` 中的法源说明是否与实际发布版本一致。法条和案例的完整上游均为 [`lttxzmj/chinese-law-corpus`](https://github.com/lttxzmj/chinese-law-corpus)；公开发布时应保留该链接，并注明本地语料版本/上游 commit、处理方式和索引生成日期，不要把完整原始数据或向量索引直接提交到仓库。
+推送后在仓库页面确认 Description 与 Topics，并检查 `data/samples/SOURCES.md` 中的法源说明是否与实际发布版本一致。建议 About Description 使用：
+
+> 可观测、可评测的中文法律 RAG 工程平台：以案件状态记忆驱动多轮查询理解，支持法条/案例双语义域 BM25+Embedding 混合召回、RRF 与 LLM 适用性重排，提供证据约束生成、官方法源核验、可解释引用、批量评测、延迟/成本观测和 Prompt/模型 A/B 实验。
+
+法条和案例的完整上游均为 [`lttxzmj/chinese-law-corpus`](https://github.com/lttxzmj/chinese-law-corpus)；公开发布时应保留该链接，并注明本地语料版本/上游 commit、处理方式和索引生成日期，不要把完整原始数据或向量索引直接提交到仓库。

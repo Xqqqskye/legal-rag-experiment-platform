@@ -151,7 +151,7 @@ class Qwen37APIEmbedder:
         self.read_timeout = float(os.getenv("QWEN37_EMBEDDING_READ_TIMEOUT", os.getenv("QWEN37_EMBEDDING_TIMEOUT", "30")))
         self.max_retries = max(0, int(os.getenv("QWEN37_EMBEDDING_MAX_RETRIES", "1")))
         self.trust_env = os.getenv("QWEN37_TRUST_ENV", "false").strip().lower() in {"1", "true", "yes"}
-        self.verify_ssl = os.getenv("QWEN37_VERIFY_SSL", "false").strip().lower() in {"1", "true", "yes"}
+        self.verify_ssl = os.getenv("QWEN37_VERIFY_SSL", "true").strip().lower() in {"1", "true", "yes"}
         if not self.verify_ssl:
             requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
         self.api_key = os.getenv("DASHSCOPE_API_KEY", "").strip()

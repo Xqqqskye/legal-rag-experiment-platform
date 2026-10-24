@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "snapshot_date": "2026-10-24",
+  "upstream": {
+    "repository": "https://github.com/lttxzmj/chinese-law-corpus",
+    "verified_commit": "2c961944fcb47ad3db41962e4c6ce0c450ea3389"
+  },
+  "law_corpus": {
+    "source_version": "chinese-law-corpus_B_v3_20261020",
+    "source_content_verified_against_commit": true,
+    "law_count": 517,
+    "parent_article_count": 29826,
+    "chunk_count": 30132,
+    "embedding_index": {
+      "model": "qwen3.7-text-embedding",
+      "dimensions": 1024,
+      "created_at": "2026-10-21",
+      "files": ["index.faiss", "meta.jsonl"]
+    },
+    "comparison_index": {
+      "model": "BAAI/bge-m3",
+      "dimensions": 1024,
+      "chunk_count": 30132,
+      "created_at": "2026-10-18",
+      "active_in_demo": false
+    }
+  },
+  "case_corpus": {
+    "source_version": "chinese-law-corpus_cases_latest_20261020",
+    "guiding_case_count": 278,
+    "gazette_case_count": 445,
+    "parent_case_count": 723,
+    "chunk_strategy": "case summary + section summaries + original-text child chunks",
+    "chunk_type_counts": {
+      "case_summary": 723,
+      "section_summary": 3233,
+      "child": 27839,
+      "total": 31795
+    },
+    "embedding_index": {
+      "model": "qwen3.7-text-embedding",
+      "dimensions": 1024,
+      "created_at": "2026-10-21",
+      "files": ["index.faiss", "meta.jsonl", "case_parents.jsonl"]
+    }
+  },
+  "runtime_check": {
+    "checked_at": "2026-10-24",
+    "dense_model_loaded": "qwen3.7-text-embedding",
+    "law_dense_rows": 30132,
+    "case_dense_rows": 31795,
+    "bm25": "The demo supports Elasticsearch indices and falls back to in-process BM25 when Elasticsearch is unavailable.",
+    "full_corpora_and_indexes_in_github": false
+  },
+  "distribution_note": "This metadata snapshot contains no legal text, user queries, credentials, local filesystem paths, or model vectors. Verify upstream licensing before redistributing corpus content or derived assets."
+}

@@ -123,9 +123,9 @@ python scripts/index_bm25.py --corpus case --input E:\path\to\case_chunks.jsonl
 
 ### 数据来源与引用
 
-演示法条片段的来源、适用范围和再分发注意事项见 [`data/samples/SOURCES.md`](data/samples/SOURCES.md)。完整法条数据与案例数据均来自 GitHub 上游 [`lttxzmj/chinese-law-corpus`](https://github.com/lttxzmj/chinese-law-corpus)；本地版本、同步日期、记录数和索引状态以工作区的 `data/dataset_manifest.json` 为准。核心法源核验入口是[全国人大国家法律法规数据库](https://flk.npc.gov.cn/)，回答中应保留法源名称、条号和核验日期。`legal_eval_sample.jsonl` 是项目自编测试样例，不是真实用户数据或第三方数据集。
+演示法条片段的来源、适用范围和再分发注意事项见 [`data/samples/SOURCES.md`](data/samples/SOURCES.md)。完整法条与案例均来自 GitHub 上游 [`lttxzmj/chinese-law-corpus`](https://github.com/lttxzmj/chinese-law-corpus)。已核对的语料版本、上游 commit、记录数量和索引模型见公开的[数据版本与索引清单](data/samples/dataset_manifest.json)；完整原始语料和向量索引不随 GitHub 仓库发布。核心法源核验入口是[全国人大国家法律法规数据库](https://flk.npc.gov.cn/)，回答中应保留法源名称、条号和核验日期。`legal_eval_sample.jsonl` 是项目自编测试样例，不是真实用户数据或第三方数据集。
 
-本工作区的完整 Qwen3.7 FAISS 资产不随 GitHub 仓库提交（文件较大，且元数据可能包含受限法源）。本地运行完整 Demo 时，需要把 `data/indexes/law_qwen37_api_latest/` 和 `data/indexes/cases_qwen37_api_latest/` 放到工作区对应目录，并在 `.env` 中填写 DashScope API Key。公开仓库中的 `scripts/index_sample.py` 仅用于 5 条公开样例的 Elasticsearch 演示；完整法条/案例元数据可使用 `scripts/index_bm25.py` 分别生成 `law_bm25_latest` 和 `case_bm25_latest`，不会把向量模型或密钥写进仓库。
+本地完整 Demo 使用法条与案例各自的 Qwen3.7 FAISS 索引，以及 BM25 词法召回。完整 FAISS 索引（约 31k 法条块与 31k 案例块）不随 GitHub 仓库提交：除体积外，原始语料和派生索引的再分发许可仍需逐项确认。运行完整 Demo 时，将 `law_qwen37_api_latest/` 与 `cases_qwen37_api_latest/` 放入工作区 `data/indexes/`，并在 `.env` 配置 DashScope API Key。仓库中的 `scripts/index_sample.py` 用于对 5 条公开法条样例建立 Elasticsearch BM25 和 BGE 对照索引；完整法条/案例的 BM25 索引可使用 `scripts/index_bm25.py` 生成。没有 Elasticsearch 时，服务会从对应 Dense 索引的元数据在本机建立 BM25 回退索引。
 
 ### 3. 启动 Demo
 

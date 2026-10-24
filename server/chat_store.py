@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -28,12 +29,18 @@ class ChatStore:
     def __init__(self, path: Path = DEFAULT_DB_PATH) -> None:
         self.path = path
 
-    def _connect(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connect(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(self.path, timeout=30)
         connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA journal_mode = WAL")
-        return connection
+        try:
+            with connection:
+                yield connection
+        finally:
+            connection.close()
 
     def initialize(self) -> None:
         with self._connect() as connection:
@@ -144,7 +151,32 @@ class ChatStore:
                 (json_text(case_memory), utc_now(), session_id),
             )
 
+    def append_turn(
+        self, session_id: str, user_text: str, assistant_text: str,
+        result: dict[str, Any], case_memory: dict[str, Any], title: str | None = None,
+    ) -> dict[str, Any]:
+        """Commit both messages and memory together only after generation succeeds."""
+        now = utc_now()
+        with self._connect() as connection:
+            if connection.execute("SELECT id FROM chat_sessions WHERE id = ?", (session_id,)).fetchone() is None:
+                raise KeyError(session_id)
+            connection.executemany(
+                "INSERT INTO chat_messages(session_id, role, content, result_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                [
+                    (session_id, "user", user_text, None, now),
+                    (session_id, "assistant", assistant_text, json_text(result), now),
+                ],
+            )
+            connection.execute(
+                "UPDATE chat_sessions SET title = COALESCE(?, title), case_memory_json = ?, updated_at = ? WHERE id = ?",
+                ((title or "")[:120] or None, json_text(case_memory), now, session_id),
+            )
+        return {"role": "assistant", "content": assistant_text, "result": result, "created_at": now}
+
     def delete_session(self, session_id: str) -> bool:
         with self._connect() as connection:
+            # Also clean orphaned rows created by older versions that did not
+            # enable SQLite's per-connection foreign-key enforcement.
+            connection.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
             cursor = connection.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
         return cursor.rowcount > 0

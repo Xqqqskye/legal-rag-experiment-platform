@@ -30,8 +30,11 @@ DEFAULT_PROMPTS = {
 输出字段：intent（legal_consultation/harmful_request/non_legal/ambiguous）、
 is_complete（布尔值）、needs_context（布尔值）、context_resolution（not_needed/resolved/unresolved）、
 missing_facts（仍需用户补充的关键事实数组）、case_action（continue/new_case/correction/switch/uncertain）、
+target_case_id（切回已有案件时填记忆中的 case_id，否则为空）、case_summary（当前案件的简短事实摘要）、
+corrections（本轮用户明确纠正的事实键值对象，否则为空对象）、
+direct_response（non_legal 时给一句简短自然的回应，最多80字；其他情况为空）、
 rewrite_query、legal_issues（字符串数组）、
-entities（主体关系、行为、损害、时间地点等对象）、urgency（普通/紧急）、
+entities（仅提取用户明确提供的主体关系、行为、损害、时间地点等事实；不可保存助手推测或法律结论）、urgency（普通/紧急）、
 proof_gaps（仍需证明的关键事实数组）、retrieval_queries（最多4个检索子问题数组）。
 rewrite_query 必须保留主体关系和适用条件，并补充法言法语、可能请求权与证据词，
 但不得虚构用户未提供的事实，不得把待证明事实写成既定事实。

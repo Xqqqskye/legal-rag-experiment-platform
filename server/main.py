@@ -16,6 +16,7 @@ import re
 import statistics
 import time
 import uuid
+import weakref
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -24,7 +25,7 @@ from elasticsearch import Elasticsearch
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from server.pipeline import (
     DEFAULT_PROMPTS,
@@ -34,7 +35,7 @@ from server.pipeline import (
     llm_client,
     rerank_candidates,
 )
-from server.qwen37_retrieval import Qwen37APIEmbedder, retrieve, retrieve_cases_hybrid, rrf_candidates
+from server.qwen37_retrieval import Qwen37APIEmbedder, retrieve_evidence, rrf_candidates
 from server.experiment_store import ExperimentStore
 from server.chat_store import ChatStore
 from server.online_legal_search import search_official_legal_sources
@@ -106,9 +107,20 @@ MODEL_PRICES_CNY_PER_MILLION = {
 MODEL_PRICING_SNAPSHOT_DATE = os.getenv("MODEL_PRICING_SNAPSHOT_DATE", "2026-09-11")
 
 
-class LegalQueryRequest(BaseModel):
-    question: str = Field(min_length=2, max_length=1200)
+class TextInputRequest(BaseModel):
+    @field_validator("question", "message", check_fields=False)
+    @classmethod
+    def nonblank_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("请输入问题或消息")
+        return value
+
+
+class LegalQueryRequest(TextInputRequest):
+    question: str = Field(min_length=1, max_length=1200)
     use_rewrite: bool = True
+    include_cases: bool = True
     retrieval_mode: str = "BM25 + Qwen3.7 向量 + RRF"
     final_top_k: int = Field(default=5, ge=1, le=5)
     run_evaluation: bool = True
@@ -129,9 +141,10 @@ class ChatSessionCreateRequest(BaseModel):
     title: str = Field(default="新的法律咨询", max_length=120)
 
 
-class ChatMessageRequest(BaseModel):
-    message: str = Field(min_length=2, max_length=1200)
+class ChatMessageRequest(TextInputRequest):
+    message: str = Field(min_length=1, max_length=1200)
     use_rewrite: bool = True
+    include_cases: bool = True
     retrieval_mode: str = "BM25 + Qwen3.7 向量 + RRF"
     final_top_k: int = Field(default=5, ge=1, le=5)
     run_evaluation: bool = False
@@ -149,6 +162,7 @@ class ChatMessageRequest(BaseModel):
 class ExperimentPipelineConfig(BaseModel):
     label: str = Field(default="方案", min_length=1, max_length=30)
     use_rewrite: bool = True
+    include_cases: bool = True
     retrieval_mode: str = "BM25 + Qwen3.7 向量 + RRF"
     final_top_k: int = Field(default=5, ge=1, le=5)
     run_evaluation: bool = True
@@ -216,6 +230,11 @@ class Runtime:
             self.es = None
 
         self.embedder = Qwen37APIEmbedder()
+        if self.es is None:
+            # Build once before serving requests instead of adding ~20 seconds
+            # to the first legal question. Subsequent lookups reuse these maps.
+            self.embedder.local_bm25
+            self.embedder.local_case_bm25
         self.client, default_model, self.provider = llm_client()
         if self.provider == "dashscope":
             self.analysis_model = os.getenv("DASHSCOPE_ANALYSIS_MODEL", "qwen3.8-flash")
@@ -244,6 +263,7 @@ runtime = Runtime()
 experiment_store = ExperimentStore()
 chat_store = ChatStore()
 batch_tasks: dict[str, asyncio.Task[Any]] = {}
+chat_locks: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
 
 def _model_options() -> dict[str, list[str]]:
@@ -681,6 +701,7 @@ def _clarification_result(
     models: dict[str, str],
     prompt_trace: dict[str, Any],
     started: float,
+    analysis_cost: float = 0,
 ) -> dict[str, Any]:
     """Stop before retrieval when context is genuinely insufficient."""
     follow_up = [str(item).strip() for item in (analysis.get("missing_facts") or []) if str(item).strip()]
@@ -706,7 +727,7 @@ def _clarification_result(
         "risk_notice": "",
         "evaluation": {"status": "not_applicable"},
         "online_verification": {"status": "not_applicable", "sources": []},
-        "cost": _cost_summary({"analysis": 0}),
+        "cost": _cost_summary({"analysis": analysis_cost}),
         "timings_sec": {"analysis": round(time.perf_counter() - started, 3), "total": round(time.perf_counter() - started, 3)},
         "corpus_cutoff": os.getenv("CORPUS_CUTOFF", "2022-06-24"),
     }
@@ -745,6 +766,7 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
             {"analysis": analysis_model, "rerank": rerank_model, "answer": answer_model, "evaluation": evaluation_model, "online": online_search_model},
             prompt_trace,
             started,
+            _estimated_cost(analysis_model, analysis_usage),
         )
 
     if intent != "legal_consultation":
@@ -754,7 +776,10 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
             "analysis": analysis,
             "models": {"analysis": analysis_model, "rerank": rerank_model, "answer": answer_model, "evaluation": evaluation_model, "online": online_search_model},
             "prompt_trace": prompt_trace,
-            "answer": "该问题未进入法律检索链路。",
+            "answer": (
+                "我不能协助实施伤害、违法行为或规避追查。你可以说明希望解决的纠纷，我可以帮助寻找合法、安全的处理方式。"
+                if intent == "harmful_request" else str(analysis.get("direct_response") or "你好，我可以帮助你了解法律问题；也可以继续聊你关心的事情。")
+            ),
             "retrieval": {"bm25": [], "qwen37": [], "cases_bm25": [], "cases_qwen37": [], "fusion": []},
             "ranking": [],
             "contexts": [],
@@ -770,22 +795,19 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
     rewrite = str(analysis.get("rewrite_query") or "").strip()
     retrieval_query = rewrite if payload.use_rewrite and rewrite else payload.question
     use_dense = payload.retrieval_mode != "仅 BM25"
-    bm25_hits, dense_hits = retrieve(runtime.es, runtime.embedder, retrieval_query, include_dense=use_dense)
-    case_bm25_hits, case_dense_hits = retrieve_cases_hybrid(runtime.es, runtime.embedder, retrieval_query, include_dense=use_dense)
+    bm25_hits, dense_hits, case_bm25_hits, case_dense_hits, retrieval_timings = retrieve_evidence(
+        runtime.es, runtime.embedder, retrieval_query, include_dense=use_dense,
+        include_bm25=payload.retrieval_mode != "仅 Qwen3.7 向量", include_cases=payload.include_cases,
+    )
     after_retrieval = time.perf_counter()
 
-    if payload.retrieval_mode == "仅 BM25":
-        candidates = _single_candidates(bm25_hits, "bm25") + _single_candidates(case_bm25_hits, "case_bm25")
-    elif payload.retrieval_mode == "仅 Qwen3.7 向量":
-        candidates = _single_candidates(dense_hits + case_dense_hits, "qwen37")
-    else:
-        candidates = rrf_candidates(
-            bm25_hits,
-            dense_hits,
-            case_dense_hits,
-            int(os.getenv("RRF_K", "60")),
-            case_bm25=case_bm25_hits,
-        )
+    candidates = rrf_candidates(
+        bm25_hits,
+        dense_hits,
+        case_dense_hits,
+        int(os.getenv("RRF_K", "60")),
+        case_bm25=case_bm25_hits,
+    )
     candidates = candidates[: int(os.getenv("RRF_TOPK", "20"))]
     after_fusion = time.perf_counter()
 
@@ -872,6 +894,7 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
         "retrieval_query": retrieval_query,
         "use_rewrite": payload.use_rewrite,
         "retrieval_mode": payload.retrieval_mode,
+        "include_cases": payload.include_cases,
         "rerank_skipped": payload.skip_rerank,
         "models": {"analysis": analysis_model, "rerank": rerank_model, "answer": answer_model, "evaluation": evaluation_model, "online": online_search_model},
         "prompt_trace": prompt_trace,
@@ -908,6 +931,7 @@ def _run_query(payload: LegalQueryRequest) -> dict[str, Any]:
         "timings_sec": {
             "analysis": round(after_analysis - started, 3),
             "retrieval": round(after_retrieval - after_analysis, 3),
+            "retrieval_breakdown": retrieval_timings,
             "fusion": round(after_fusion - after_retrieval, 3),
             "online_search": round(after_online - after_fusion, 3),
             "rerank": round(after_rerank - after_online, 3),
@@ -926,6 +950,8 @@ def _pipeline_request(question: str, config: ExperimentPipelineConfig) -> LegalQ
 
 
 def _run_bad_cases(result: dict[str, Any], use_online_search: bool) -> list[str]:
+    if _canonical_intent(result.get("intent")) != "legal_consultation":
+        return []
     findings: list[str] = []
     evaluation = result.get("evaluation") or {}
     for issue in evaluation.get("issues") or []:
@@ -982,7 +1008,7 @@ def _contextual_question(payload: LegalQueryRequest) -> str:
     return "\n".join(lines)
 
 
-def _merge_case_memory(previous: dict[str, Any], analysis: dict[str, Any]) -> dict[str, Any]:
+def _merge_case_memory(previous: dict[str, Any], analysis: dict[str, Any], user_text: str = "") -> dict[str, Any]:
     """Merge explicit facts into a versioned, multi-case memory.
 
     The old flat keys are retained for UI/backward compatibility, while the
@@ -990,7 +1016,11 @@ def _merge_case_memory(previous: dict[str, Any], analysis: dict[str, Any]) -> di
     silently erase why the previous value changed.
     """
     now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
-    memory = dict(previous or {})
+    memory = json.loads(json.dumps(previous or {}, ensure_ascii=False))
+    intent = _canonical_intent(analysis.get("intent"))
+    if intent != "legal_consultation" or analysis.get("needs_context") is True:
+        memory["last_route"] = {"intent": intent, "needs_context": analysis.get("needs_context") is True, "updated_at": now}
+        return memory
     memory["schema_version"] = 2
     cases = dict(memory.get("cases") or {})
     active_id = str(memory.get("active_case_id") or "")
@@ -1009,27 +1039,38 @@ def _merge_case_memory(previous: dict[str, Any], analysis: dict[str, Any]) -> di
         active["case_id"] = active_id
 
     action = str(analysis.get("case_action") or "continue").strip().lower()
-    if action in {"new_case", "switch", "new", "切换案件", "新案件"} or bool(analysis.get("new_topic")):
-        next_number = len(cases) + 1
+    target_id = str(analysis.get("target_case_id") or "")
+    if target_id in cases:
+        active_id = target_id
+        active = dict(cases[target_id])
+    elif action in {"new_case", "switch", "new", "切换案件", "新案件"}:
+        if active.get("facts") or active.get("legal_issues"):
+            cases[active_id] = active
+        next_number = 1
+        while f"case-{next_number}" in cases:
+            next_number += 1
         active_id = f"case-{next_number}"
         active = {"case_id": active_id, "facts": {}, "legal_issues": [], "proof_gaps": [], "corrections": []}
 
     facts = dict(active.get("facts") or active.get("entities") or {})
     provenance = dict(active.get("fact_provenance") or {})
     conflicts = list(memory.get("conflicts") or [])
+    correction_history = list(active.get("corrections") or [])
+    corrections = analysis.get("corrections") if isinstance(analysis.get("corrections"), dict) else {}
     entities = analysis.get("entities")
     if isinstance(entities, dict):
         for key, value in entities.items():
             key = str(key)
+            if key in corrections:
+                continue
             if value in (None, "", [], {}):
                 continue
             old_value = facts.get(key)
             if old_value not in (None, "", [], {}) and old_value != value:
                 conflicts.append({"case_id": active_id, "field": key, "old": old_value, "new": value, "resolved_at": now})
             facts[key] = value
-            provenance[key] = {"source": "user_current_turn", "updated_at": now}
+            provenance[key] = {"source": "model_extracted_user_statement", "user_text": user_text[:1200], "updated_at": now}
 
-    corrections = analysis.get("corrections")
     if isinstance(corrections, dict):
         for key, value in corrections.items():
             key = str(key)
@@ -1037,14 +1078,17 @@ def _merge_case_memory(previous: dict[str, Any], analysis: dict[str, Any]) -> di
                 continue
             old_value = facts.get(key)
             if old_value not in (None, "", [], {}) and old_value != value:
-                conflicts.append({"case_id": active_id, "field": key, "old": old_value, "new": value, "resolved_at": now, "type": "user_correction"})
+                entry = {"case_id": active_id, "field": key, "old": old_value, "new": value, "resolved_at": now, "type": "user_correction"}
+                conflicts.append(entry)
+                correction_history.append(entry)
             facts[key] = value
-            provenance[key] = {"source": "user_correction", "updated_at": now}
+            provenance[key] = {"source": "user_correction", "user_text": user_text[:1200], "updated_at": now}
 
     active["case_id"] = active_id
     active["facts"] = facts
     active["entities"] = facts  # compatibility with the existing memory panel
     active["fact_provenance"] = provenance
+    active["corrections"] = correction_history[-20:]
     for key in ("legal_issues", "proof_gaps", "missing_facts"):
         values = analysis.get(key)
         if isinstance(values, list):
@@ -1055,7 +1099,7 @@ def _merge_case_memory(previous: dict[str, Any], analysis: dict[str, Any]) -> di
     active["context_resolution"] = str(analysis.get("context_resolution") or "not_needed")
     if analysis.get("rewrite_query"):
         active["last_rewrite_query"] = str(analysis["rewrite_query"])[:600]
-    active["summary"] = str(analysis.get("case_summary") or active.get("summary") or "")[:600]
+    active["summary"] = str(analysis.get("case_summary") or "; ".join(f"{key}：{value}" for key, value in facts.items()) or active.get("summary") or "")[:600]
     active["updated_at"] = now
     cases[active_id] = active
 
@@ -1077,6 +1121,8 @@ def _run_comparison(payload: CompareRequest) -> dict[str, Any]:
     runs = [_run_query(_pipeline_request(payload.question, config)) for config in configs]
     comparable_fields = (
         "use_rewrite",
+        "include_cases",
+        "run_evaluation",
         "retrieval_mode",
         "final_top_k",
         "use_online_search",
@@ -1104,6 +1150,8 @@ def _run_comparison(payload: CompareRequest) -> dict[str, Any]:
         cost_delta = round(float(cost_b.get("estimated_cny") or 0) - float(cost_a.get("estimated_cny") or 0), 6)
     field_names = {
         "use_rewrite": "Query 改写",
+        "include_cases": "案例检索",
+        "run_evaluation": "质量评估",
         "retrieval_mode": "检索策略",
         "final_top_k": "上下文数量",
         "use_online_search": "联网核验",
@@ -1234,7 +1282,7 @@ def _aggregate_pipeline(case_results: list[dict[str, Any]], run_index: int) -> d
     ]
     passed = sum(1 for run in runs if run.get("benchmark", {}).get("passed"))
     intent_matches = sum(1 for run in runs if run.get("benchmark", {}).get("intent_match"))
-    citation_runs = [run for run in runs if (run.get("benchmark") or {}).get("expected_intent") == "法律咨询"]
+    citation_runs = [run for run in runs if _canonical_intent((run.get("benchmark") or {}).get("expected_intent")) == "legal_consultation"]
     citation_valid = sum(1 for run in citation_runs if run.get("benchmark", {}).get("citation_valid"))
     bad_cases = [
         {
@@ -1275,7 +1323,7 @@ def _batch_summary(experiment: dict[str, Any]) -> dict[str, Any]:
     if pipeline_a["average_quality"] is not None and pipeline_b["average_quality"] is not None:
         quality_delta = round(pipeline_b["average_quality"] - pipeline_a["average_quality"], 2)
     changed_fields = []
-    for field in ("use_rewrite", "retrieval_mode", "final_top_k", "use_online_search", "analysis_model", "answer_model", "evaluation_model", "online_search_model"):
+    for field in ("use_rewrite", "include_cases", "retrieval_mode", "final_top_k", "use_online_search", "analysis_model", "rerank_model", "answer_model", "evaluation_model", "online_search_model", "run_evaluation", "prompt_overrides"):
         if experiment["pipeline_a"].get(field) != experiment["pipeline_b"].get(field):
             changed_fields.append(field)
     if len(changed_fields) == 1:
@@ -1343,7 +1391,10 @@ async def _execute_batch_experiment(experiment_id: str) -> None:
 
 @app.get("/api/healthz")
 async def healthz() -> JSONResponse:
-    es_ok = bool(runtime.es is not None and await asyncio.to_thread(runtime.es.ping))
+    try:
+        es_ok = bool(runtime.es is not None and await asyncio.to_thread(runtime.es.ping))
+    except Exception:
+        es_ok = False
     status = 200 if runtime.ready else 503
     return JSONResponse(
         status_code=status,
@@ -1420,7 +1471,9 @@ async def get_chat_session(session_id: str) -> dict[str, Any]:
 
 @app.delete("/api/chat/sessions/{session_id}")
 async def delete_chat_session(session_id: str) -> dict[str, Any]:
-    deleted = await asyncio.to_thread(chat_store.delete_session, session_id)
+    lock = chat_locks.setdefault(session_id, asyncio.Lock())
+    async with lock:
+        deleted = await asyncio.to_thread(chat_store.delete_session, session_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="会话不存在")
     return {"deleted": True, "id": session_id}
@@ -1428,6 +1481,15 @@ async def delete_chat_session(session_id: str) -> dict[str, Any]:
 
 @app.post("/api/chat/sessions/{session_id}/messages")
 async def send_chat_message(session_id: str, payload: ChatMessageRequest, request: Request) -> dict[str, Any]:
+    # Serialize context read + generation + commit. Taking the snapshot before
+    # acquiring the semaphore allowed simultaneous turns to overwrite memory.
+    lock = chat_locks.setdefault(session_id, asyncio.Lock())
+    async with lock:
+        async with runtime.semaphore:
+            return await _send_chat_message(session_id, payload, request)
+
+
+async def _send_chat_message(session_id: str, payload: ChatMessageRequest, request: Request) -> dict[str, Any]:
     if not runtime.ready:
         raise HTTPException(status_code=503, detail=runtime.error or "实时检索服务尚未就绪")
     session = await asyncio.to_thread(chat_store.get_session, session_id)
@@ -1438,20 +1500,12 @@ async def send_chat_message(session_id: str, payload: ChatMessageRequest, reques
         for item in session.get("messages", [])[-12:]
     ]
     title = payload.message.strip()[:40] if not previous_messages else None
-    await asyncio.to_thread(
-        chat_store.append_message,
-        session_id,
-        "user",
-        payload.message.strip(),
-        None,
-        title,
-        None,
-    )
     fast_analysis_model = payload.analysis_model or ("qwen3.8-flash" if runtime.provider == "dashscope" else None)
     fast_answer_model = payload.answer_model or ("qwen3.8-flash" if runtime.provider == "dashscope" else None)
     query = LegalQueryRequest(
         question=payload.message.strip(),
         use_rewrite=payload.use_rewrite,
+        include_cases=payload.include_cases,
         retrieval_mode=payload.retrieval_mode,
         final_top_k=payload.final_top_k,
         run_evaluation=payload.run_evaluation,
@@ -1470,8 +1524,7 @@ async def send_chat_message(session_id: str, payload: ChatMessageRequest, reques
         skip_rerank=payload.skip_rerank,
     )
     try:
-        async with runtime.semaphore:
-            result = await asyncio.to_thread(_run_query, query)
+        result = await asyncio.to_thread(_run_query, query)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -1479,23 +1532,24 @@ async def send_chat_message(session_id: str, payload: ChatMessageRequest, reques
         raise HTTPException(status_code=502, detail=f"多轮问答失败：{exc}") from exc
 
     analysis = result.get("analysis") or {}
-    case_memory = _merge_case_memory(session.get("case_memory") or {}, analysis)
+    case_memory = _merge_case_memory(session.get("case_memory") or {}, analysis, payload.message)
     compact_result = {
         "intent": result.get("intent"),
         "analysis": analysis,
         "contexts": result.get("contexts") or [],
+        "online_sources": (result.get("online_verification") or {}).get("official_sources") or [],
         "follow_up_questions": result.get("follow_up_questions") or [],
         "risk_notice": result.get("risk_notice") or "",
         "timings_sec": result.get("timings_sec") or {},
     }
     assistant_message = await asyncio.to_thread(
-        chat_store.append_message,
+        chat_store.append_turn,
         session_id,
-        "assistant",
+        payload.message.strip(),
         result.get("answer") or "未生成回答。",
         compact_result,
-        None,
         case_memory,
+        title,
     )
     updated_session = await asyncio.to_thread(chat_store.get_session, session_id)
     return {"session": updated_session, "message": assistant_message, "result": result, "case_memory": case_memory}

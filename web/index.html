@@ -531,6 +531,7 @@
     </div>
     <div class="config-row">
       <label><input type="checkbox" id="useRewrite" checked> 启用 Query 改写</label>
+      <label><input type="checkbox" id="includeCases" checked> 检索参考案例</label>
       <label><input type="checkbox" id="runEvaluation" checked> 运行质量评估</label>
       <label><input type="checkbox" id="useOnlineSearch"> 权威法源联网核验（可能增加 30–90 秒）</label>
       <label>检索策略 <select id="retrieveMode"><option>BM25 + Qwen3.7 向量 + RRF</option><option>仅 BM25</option><option>仅 Qwen3.7 向量</option></select></label>
@@ -574,11 +575,12 @@
         <div class="chat-session-list" id="chatSessionList"><p class="note">正在加载会话…</p></div>
       </aside>
       <main class="chat-main">
-        <div class="chat-header"><div><h2 id="chatTitle">请选择或新建会话</h2><p class="note">当前链路：语义完整性判断 + Qwen3.7 分析 + 法条/案例 BM25 与向量混合检索 + 直接 RRF（不调用 LLM 重排）</p></div><div class="chat-header-actions"><button class="secondary-btn" id="toggleChatMemory" aria-expanded="false">案件记忆</button><button class="secondary-btn" id="deleteChatSession">删除会话</button></div></div>
+        <div class="chat-header"><div><h2 id="chatTitle">请选择或新建会话</h2><p class="note">当前链路：上下文理解与意图识别 + 法条/案例混合检索 + 直接 RRF</p></div><div class="chat-header-actions"><button class="secondary-btn" id="toggleChatMemory" aria-expanded="false">案件记忆</button><button class="secondary-btn" id="deleteChatSession">删除会话</button></div></div>
         <div class="chat-memory hidden" id="chatMemory">尚未记录案件事实。</div>
         <div class="chat-messages" id="chatMessages"><p class="note">新建会话后开始多轮法律咨询。</p></div>
         <div class="chat-compose"><textarea id="chatInput" placeholder="继续描述案情，或补充上一轮缺失的事实…"></textarea><button id="sendChatMessage">发送</button></div>
-        <p class="note">多轮上下文会用于处理指代、省略和事实补充；系统仍会把当前问题单独标记为本轮输入。</p>
+        <div class="config-row"><label><input type="checkbox" id="chatIncludeCases" checked> 检索参考案例</label><span class="note">取消后只检索法条；案例仅在相关时作为参考。</span></div>
+        <p class="note" id="chatLatency" role="status"></p>
       </main>
     </div>
   </section>
@@ -601,7 +603,7 @@
             <label>联网模型<select id="cmpAOnline"></select></label>
             <label>提示词版本<select id="cmpAPromptProfile"><option value="default">默认提示词</option><option value="A" selected>实验室 A</option><option value="B">实验室 B</option></select></label>
           </div>
-          <div class="pipeline-checks"><label><input type="checkbox" id="cmpARewrite" checked> Query 改写</label><label><input type="checkbox" id="cmpAEval" checked> 自动评估</label><label><input type="checkbox" id="cmpAWeb"> 联网核验</label></div>
+          <div class="pipeline-checks"><label><input type="checkbox" id="cmpARewrite" checked> Query 改写</label><label><input type="checkbox" id="cmpAEval" checked> 自动评估</label><label><input type="checkbox" id="cmpAWeb"> 联网核验</label><label><input type="checkbox" id="cmpAIncludeCases" checked> 检索参考案例</label></div>
         </div>
         <div class="pipeline-config">
           <h3>方案 B · Challenger</h3>
@@ -615,7 +617,7 @@
             <label>联网模型<select id="cmpBOnline"></select></label>
             <label>提示词版本<select id="cmpBPromptProfile"><option value="default">默认提示词</option><option value="A">实验室 A</option><option value="B" selected>实验室 B</option></select></label>
           </div>
-          <div class="pipeline-checks"><label><input type="checkbox" id="cmpBRewrite" checked> Query 改写</label><label><input type="checkbox" id="cmpBEval" checked> 自动评估</label><label><input type="checkbox" id="cmpBWeb"> 联网核验</label></div>
+          <div class="pipeline-checks"><label><input type="checkbox" id="cmpBRewrite" checked> Query 改写</label><label><input type="checkbox" id="cmpBEval" checked> 自动评估</label><label><input type="checkbox" id="cmpBWeb"> 联网核验</label><label><input type="checkbox" id="cmpBIncludeCases" checked> 检索参考案例</label></div>
         </div>
       </div>
       <div class="compare-run"><p class="note">两套方案顺序运行，避免并发资源竞争污染延迟数据。</p><button class="run-btn" id="runCompare">运行 A/B 实验</button></div>
@@ -668,7 +670,7 @@
             <label>联网模型<select id="batchAOnline"></select></label>
             <label>提示词版本<select id="batchAPromptProfile"><option value="default">默认提示词</option><option value="A" selected>实验室 A</option><option value="B">实验室 B</option></select></label>
           </div>
-          <div class="pipeline-checks"><label><input type="checkbox" id="batchARewrite" checked> Query 改写</label><label><input type="checkbox" id="batchAEval" checked> 自动评估</label><label><input type="checkbox" id="batchAWeb"> 联网核验</label></div>
+          <div class="pipeline-checks"><label><input type="checkbox" id="batchARewrite" checked> Query 改写</label><label><input type="checkbox" id="batchAEval" checked> 自动评估</label><label><input type="checkbox" id="batchAWeb"> 联网核验</label><label><input type="checkbox" id="batchAIncludeCases" checked> 检索参考案例</label></div>
         </div>
         <div class="pipeline-config">
           <h3>方案 B · Challenger</h3>
@@ -682,7 +684,7 @@
             <label>联网模型<select id="batchBOnline"></select></label>
             <label>提示词版本<select id="batchBPromptProfile"><option value="default">默认提示词</option><option value="A">实验室 A</option><option value="B" selected>实验室 B</option></select></label>
           </div>
-          <div class="pipeline-checks"><label><input type="checkbox" id="batchBRewrite" checked> Query 改写</label><label><input type="checkbox" id="batchBEval" checked> 自动评估</label><label><input type="checkbox" id="batchBWeb"> 联网核验</label></div>
+          <div class="pipeline-checks"><label><input type="checkbox" id="batchBRewrite" checked> Query 改写</label><label><input type="checkbox" id="batchBEval" checked> 自动评估</label><label><input type="checkbox" id="batchBWeb"> 联网核验</label><label><input type="checkbox" id="batchBIncludeCases" checked> 检索参考案例</label></div>
         </div>
       </div>
       <div class="compare-run"><p class="note" id="batchEstimate">选择样本后运行；每条样本依次执行 A、B 两套完整链路。</p><button class="run-btn" id="runBatch">开始批量实验</button></div>
@@ -732,6 +734,7 @@
   <div class="footer">每次请求都实时检索本地法律索引，并可对检索证据、引用和答案质量进行自动评估。</div>
 </div>
 
+<script src="api-client.js"></script>
 <script>
 const escapeHtml = value => String(value).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const MODEL_INFO = {
@@ -803,7 +806,7 @@ function showPromptStage(stage) {
 }
 async function loadPromptCatalog() {
   if (promptCatalog.length) return;
-  const response = await fetch("/api/prompts", { cache: "no-store" });
+  const response = await apiFetch("/api/prompts");
   const data = await response.json();
   if (!response.ok) throw new Error(data.detail || "提示词读取失败");
   promptCatalog = data.stages || [];
@@ -874,7 +877,7 @@ function fillModelSelect(id, options, selected, showDefault = false) {
 }
 async function checkHealth() {
   try {
-    const response = await fetch("/api/healthz", { cache: "no-store" });
+    const response = await apiFetch("/api/healthz");
     const data = await response.json();
     if (!response.ok || !data.ready) throw new Error(data.error || "服务尚未就绪");
     setServiceStatus("ready", `实时服务已就绪 · 语料截止 ${data.corpus_cutoff}`);
@@ -976,10 +979,10 @@ async function runInteractive() {
   const onlineSearchModel = document.getElementById("onlineModel").value;
   const promptConfig = promptConfigFromSelect("singlePromptProfile");
   try {
-    const response = await fetch("/api/legal-query", {
+    const response = await apiFetch("/api/legal-query", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, use_rewrite: useRewrite, retrieval_mode: mode, final_top_k: topK, run_evaluation: runEvaluation, use_online_search: useOnlineSearch, skip_rerank: skipRerank, analysis_model: analysisModel, rerank_model: rerankModel, answer_model: answerModel, evaluation_model: evaluationModel, online_search_model: onlineSearchModel, ...promptConfig })
+      body: JSON.stringify({ question, include_cases: document.getElementById("includeCases").checked, use_rewrite: useRewrite, retrieval_mode: mode, final_top_k: topK, run_evaluation: runEvaluation, use_online_search: useOnlineSearch, skip_rerank: skipRerank, analysis_model: analysisModel, rerank_model: rerankModel, answer_model: answerModel, evaluation_model: evaluationModel, online_search_model: onlineSearchModel, ...promptConfig })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "实时请求失败");
@@ -1077,6 +1080,16 @@ async function runInteractive() {
 }
 let chatSessions = [];
 let activeChatSession = null;
+let chatSending = false;
+let chatCreating = null;
+let chatLoadVersion = 0;
+
+function showChatError(error) {
+  const box = document.getElementById("chatMessages");
+  box.querySelectorAll(".chat-error").forEach(node => node.remove());
+  box.insertAdjacentHTML("beforeend", `<div class="answer-warning chat-error" role="alert">${escapeHtml(error.message || String(error))}</div>`);
+  box.scrollTop = box.scrollHeight;
+}
 
 function renderChatSessions() {
   const node = document.getElementById("chatSessionList");
@@ -1085,7 +1098,10 @@ function renderChatSessions() {
       <strong>${escapeHtml(item.title || "新的法律咨询")}</strong>
       <small>${Number(item.message_count || 0)} 条消息 · ${escapeHtml(String(item.updated_at || "").replace("T", " ").slice(0, 16))}</small>
     </button>`).join("") || `<p class="note">还没有已保存的会话。</p>`;
-  node.querySelectorAll(".chat-session").forEach(button => button.addEventListener("click", () => loadChatSession(button.dataset.sessionId)));
+  node.querySelectorAll(".chat-session").forEach(button => {
+    button.disabled = chatSending;
+    button.addEventListener("click", () => loadChatSession(button.dataset.sessionId).catch(showChatError));
+  });
 }
 
 function renderChatSession(session) {
@@ -1106,7 +1122,12 @@ function renderChatSession(session) {
     const prefix = `chat-evidence-${index}`;
     const contexts = result.contexts || [];
     const evidence = contexts.map(ctx => `<details id="${prefix}-${Number(ctx.id)}"><summary>[证据 ${Number(ctx.id)}] ${escapeHtml(ctx.title || "未命名证据")}</summary><p>${escapeHtml(ctx.text || "")}</p></details>`).join("");
-    const evidenceHtml = evidence ? `<div class="chat-evidence-list">${evidence}</div>` : "";
+    const online = (result.online_sources || []).map(source => {
+      const url = source.final_url || source.url || "";
+      const link = /^https?:\/\//.test(url) ? `<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">打开来源</a>` : "";
+      return `<details id="${prefix}-online-${Number(source.id)}"><summary>[联网 ${Number(source.id)}] ${escapeHtml(source.title || "官方来源")}</summary>${link}<p>${escapeHtml(source.summary || source.snippet || "")}</p></details>`;
+    }).join("");
+    const evidenceHtml = evidence || online ? `<div class="chat-evidence-list">${evidence}${online}</div>` : "";
     return `<div class="chat-message assistant">${linkifyCitations(item.content || "", prefix)}${evidenceHtml}<span class="chat-meta">${escapeHtml([timeText, intent].filter(Boolean).join(" · "))}</span></div>`;
   }).join("") || `<p class="note">新建会话后开始多轮法律咨询。</p>`;
   const box = document.getElementById("chatMessages");
@@ -1115,35 +1136,30 @@ function renderChatSession(session) {
 }
 
 async function createChatSession() {
-  const response = await fetch("/api/chat/sessions", {
+  if (chatCreating) return chatCreating;
+  chatCreating = createChatSessionRequest();
+  try { return await chatCreating; } finally { chatCreating = null; }
+}
+
+async function createChatSessionRequest() {
+  const response = await apiFetch("/api/chat/sessions", {
     method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title: "新的法律咨询" })
   });
   const data = await response.json();
   if (!response.ok) throw new Error(data.detail || "会话创建失败");
   chatSessions = [data, ...chatSessions.filter(item => item.id !== data.id)];
+  chatLoadVersion += 1;
   renderChatSession(data);
+  return data;
 }
 
 async function loadChatSessions() {
-  let response;
-  let lastError;
-  // The chat tab is initialized immediately after the page loads. A brief
-  // server restart or browser connection reset should not leave the composer
-  // without an active session and make every later send fail with "Failed to
-  // fetch". Retry only this idempotent GET; never retry message POSTs.
-  for (let attempt = 0; attempt < 6; attempt += 1) {
-    try {
-      response = await fetch("/api/chat/sessions?limit=30", { cache: "no-store" });
-      break;
-    } catch (error) {
-      lastError = error;
-      if (attempt < 5) await new Promise(resolve => setTimeout(resolve, 750 * (attempt + 1)));
-    }
-  }
-  if (!response) throw lastError || new Error("无法连接到多轮对话服务");
+  const version = ++chatLoadVersion;
+  const response = await apiFetch("/api/chat/sessions?limit=30");
   const data = await response.json();
   if (!response.ok) throw new Error(data.detail || "会话读取失败");
+  if (version !== chatLoadVersion || chatSending) return;
   chatSessions = data.sessions || [];
   renderChatSessions();
   if (activeChatSession && chatSessions.some(item => item.id === activeChatSession.id)) {
@@ -1156,23 +1172,33 @@ async function loadChatSessions() {
 }
 
 async function loadChatSession(sessionId) {
-  const response = await fetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`, { cache: "no-store" });
+  const version = ++chatLoadVersion;
+  const response = await apiFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}`);
   const data = await response.json();
   if (!response.ok) throw new Error(data.detail || "会话读取失败");
-  renderChatSession(data);
+  if (version === chatLoadVersion && !chatSending) renderChatSession(data);
 }
 
 async function sendChatMessage() {
-  if (!activeChatSession) await createChatSession();
   const input = document.getElementById("chatInput");
   const message = input.value.trim();
-  if (!message) { input.focus(); return; }
+  if (!message || chatSending) { input.focus(); return; }
+  if (message.length > 1200) { showChatError(new Error("消息最多 1200 个字符，请分段发送。")); return; }
   const button = document.getElementById("sendChatMessage");
+  chatSending = true;
   button.disabled = true; button.textContent = "处理中…";
+  document.getElementById("chatLatency").textContent = "正在处理本轮问题…";
+  input.disabled = true;
+  ["newChatSession", "deleteChatSession"].forEach(id => document.getElementById(id).disabled = true);
+  renderChatSessions();
   try {
-    const response = await fetch(`/api/chat/sessions/${encodeURIComponent(activeChatSession.id)}/messages`, {
+    if (!activeChatSession) await createChatSession();
+    const sessionId = activeChatSession.id;
+    document.getElementById("chatMessages").insertAdjacentHTML("beforeend", `<div class="chat-message user chat-pending">${escapeHtml(message)}</div><div class="note chat-pending" role="status">正在理解上下文并检索证据…</div>`);
+    const box = document.getElementById("chatMessages"); box.scrollTop = box.scrollHeight;
+    const response = await apiFetch(`/api/chat/sessions/${encodeURIComponent(sessionId)}/messages`, {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message, retrieval_mode: "BM25 + Qwen3.7 向量 + RRF", final_top_k: 5, run_evaluation: false })
+      body: JSON.stringify({ message, include_cases: document.getElementById("chatIncludeCases").checked, retrieval_mode: "BM25 + Qwen3.7 向量 + RRF", final_top_k: 5, run_evaluation: false })
     });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "多轮问答失败");
@@ -1180,16 +1206,25 @@ async function sendChatMessage() {
     renderChatSession(data.session);
     chatSessions = [{ ...data.session, message_count: (data.session.messages || []).length }, ...chatSessions.filter(item => item.id !== data.session.id)];
     renderChatSessions();
+    const t = data.result.timings_sec || {}, detail = t.retrieval_breakdown || {};
+    document.getElementById("chatLatency").textContent = `本轮 ${Number(t.total || 0).toFixed(2)}s · 分析 ${Number(t.analysis || 0).toFixed(2)}s · 检索 ${Number(t.retrieval || 0).toFixed(2)}s（案例 BM25 ${Number(detail.case_bm25 || 0).toFixed(2)}s，案例向量 ${Number(detail.case_dense || 0).toFixed(2)}s）· 回答 ${Number(t.answer || 0).toFixed(2)}s`;
   } catch (error) {
-    document.getElementById("chatMessages").insertAdjacentHTML("beforeend", `<div class="answer-warning">${escapeHtml(error.message)}</div>`);
+    document.querySelectorAll(".chat-pending").forEach(node => node.remove());
+    showChatError(error);
+    document.getElementById("chatLatency").textContent = "本轮未完成，输入已保留。";
   } finally {
+    chatSending = false;
+    input.disabled = false;
+    ["newChatSession", "deleteChatSession"].forEach(id => document.getElementById(id).disabled = false);
     button.disabled = false; button.textContent = "发送";
+    renderChatSessions();
+    input.focus();
   }
 }
 
 async function deleteChatSession() {
   if (!activeChatSession || !confirm("确定删除当前会话及其案情记忆吗？")) return;
-  const response = await fetch(`/api/chat/sessions/${encodeURIComponent(activeChatSession.id)}`, { method: "DELETE" });
+  const response = await apiFetch(`/api/chat/sessions/${encodeURIComponent(activeChatSession.id)}`, { method: "DELETE" });
   const data = await response.json();
   if (!response.ok) { alert(data.detail || "删除失败"); return; }
   activeChatSession = null;
@@ -1209,9 +1244,9 @@ function setMode(mode) {
     loadExperimentHistory();
   }
   if (mode === "chat") loadChatSessions().catch(error => {
-    document.getElementById("chatMessages").innerHTML = `<div class="answer-warning">${escapeHtml(error.message || "无法连接到多轮对话服务")}</div>`;
+    showChatError(error);
     const list = document.getElementById("chatSessionList");
-    list.innerHTML = `<div class="answer-warning">会话列表加载失败。请检查 127.0.0.1:8008 服务后重试。</div><button class="secondary-btn" id="retryChatSessions">重试</button>`;
+    list.innerHTML = `<div class="answer-warning">会话列表暂不可用。</div><a href="http://127.0.0.1:8008/">打开本地 Demo</a><button class="secondary-btn" id="retryChatSessions">重试</button>`;
     document.getElementById("retryChatSessions").addEventListener("click", async () => {
       const button = document.getElementById("retryChatSessions");
       button.disabled = true;
@@ -1231,6 +1266,7 @@ function comparisonPipeline(prefix, label) {
   return {
     label,
     use_rewrite: document.getElementById(`cmp${prefix}Rewrite`).checked,
+    include_cases: document.getElementById(`cmp${prefix}IncludeCases`).checked,
     retrieval_mode: document.getElementById(`cmp${prefix}Retrieval`).value,
     final_top_k: Number(document.getElementById(`cmp${prefix}TopK`).value),
     run_evaluation: document.getElementById(`cmp${prefix}Eval`).checked,
@@ -1259,7 +1295,7 @@ function runMetric(run) {
     latency: Number((result.timings_sec || {}).total || 0),
     tokens: Number(cost.total_tokens || 0),
     cost: cost.fully_priced ? Number(cost.estimated_cny || 0) : null,
-    citations: Boolean((evaluation.citation_audit || {}).valid),
+    citations: evaluation.citation_audit ? Boolean(evaluation.citation_audit.valid) : null,
     officialSources: (online.official_sources || []).length,
     topLaws: (result.ranking || []).map(item => item.title).filter(Boolean).join("、") || "无",
     promptProfile: (result.prompt_trace || {}).profile || "默认提示词"
@@ -1285,7 +1321,7 @@ function renderComparison(data) {
         <tr><td>提示词版本</td><td>${escapeHtml(a.promptProfile)}</td><td>${escapeHtml(b.promptProfile)}</td></tr>
         <tr><td>总延迟</td><td>${a.latency.toFixed(2)} 秒</td><td>${b.latency.toFixed(2)} 秒</td></tr>
         <tr><td>Token / 估算费用</td><td>${a.tokens} / ${a.cost == null ? "价格不完整" : `¥${a.cost.toFixed(4)}`}</td><td>${b.tokens} / ${b.cost == null ? "价格不完整" : `¥${b.cost.toFixed(4)}`}</td></tr>
-        <tr><td>引用闭环</td><td>${a.citations ? "通过" : "未通过"}</td><td>${b.citations ? "通过" : "未通过"}</td></tr>
+        <tr><td>引用闭环</td><td>${a.citations == null ? "未检查 / 不适用" : a.citations ? "通过" : "未通过"}</td><td>${b.citations == null ? "未检查 / 不适用" : b.citations ? "通过" : "未通过"}</td></tr>
         <tr><td>官方联网来源</td><td>${a.officialSources}</td><td>${b.officialSources}</td></tr>
         <tr><td>最终法条</td><td>${escapeHtml(a.topLaws)}</td><td>${escapeHtml(b.topLaws)}</td></tr>
       </table>
@@ -1309,7 +1345,7 @@ async function runComparison() {
   document.getElementById("compareStatus").textContent = "每套方案会独立执行检索、生成和评估，通常需要 1–2 分钟。";
   document.getElementById("compareResult").classList.remove("show");
   try {
-    const response = await fetch("/api/compare", {
+    const response = await apiFetch("/api/compare", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1358,7 +1394,7 @@ function renderEvaluationCases(preserveSelection = true) {
 }
 async function loadEvaluationCases() {
   try {
-    const response = await fetch("/api/evaluation-cases", { cache: "no-store" });
+    const response = await apiFetch("/api/evaluation-cases");
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "评测集读取失败");
     const firstLoad = evaluationCases.length === 0;
@@ -1369,7 +1405,7 @@ async function loadEvaluationCases() {
   }
 }
 async function saveEvaluationCases(cases) {
-  const response = await fetch("/api/evaluation-cases/import", {
+  const response = await apiFetch("/api/evaluation-cases/import", {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ cases })
   });
   const data = await response.json();
@@ -1391,6 +1427,7 @@ function splitCsvLine(line) {
   return values;
 }
 function parseCaseFile(name, text) {
+  text = text.replace(/^\uFEFF/, "");
   if (name.toLowerCase().endsWith(".json")) {
     const value = JSON.parse(text);
     return Array.isArray(value) ? value : value.cases;
@@ -1411,6 +1448,7 @@ function batchPipeline(prefix, label) {
   return {
     label,
     use_rewrite: document.getElementById(`batch${prefix}Rewrite`).checked,
+    include_cases: document.getElementById(`batch${prefix}IncludeCases`).checked,
     retrieval_mode: document.getElementById(`batch${prefix}Retrieval`).value,
     final_top_k: Number(document.getElementById(`batch${prefix}TopK`).value),
     run_evaluation: document.getElementById(`batch${prefix}Eval`).checked,
@@ -1429,7 +1467,7 @@ async function startBatchExperiment() {
   const button = document.getElementById("runBatch");
   button.disabled = true; button.textContent = "正在创建实验…";
   try {
-    const response = await fetch("/api/batch-experiments", {
+    const response = await apiFetch("/api/batch-experiments", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         name: document.getElementById("batchName").value.trim() || "批量 A/B 实验",
@@ -1456,7 +1494,7 @@ function statusText(status) {
 async function pollBatchExperiment(id) {
   clearTimeout(batchPollTimer);
   try {
-    const response = await fetch(`/api/batch-experiments/${encodeURIComponent(id)}`, { cache: "no-store" });
+    const response = await apiFetch(`/api/batch-experiments/${encodeURIComponent(id)}`);
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "实验读取失败");
     activeBatchId = id;
@@ -1513,7 +1551,7 @@ function renderBatchExperiment(data) {
 }
 async function loadExperimentHistory() {
   try {
-    const response = await fetch("/api/batch-experiments?limit=30", { cache: "no-store" });
+    const response = await apiFetch("/api/batch-experiments?limit=30");
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || "实验记录读取失败");
     document.getElementById("historyList").innerHTML = (data.experiments || []).map(item => {
@@ -1540,6 +1578,18 @@ document.getElementById("batchModeBtn").addEventListener("click", () => setMode(
 document.getElementById("promptModeBtn").addEventListener("click", () => setMode("prompt"));
 document.getElementById("newChatSession").addEventListener("click", () => createChatSession().catch(error => alert(error.message)));
 document.getElementById("sendChatMessage").addEventListener("click", sendChatMessage);
+
+document.addEventListener("click", event => {
+  const link = event.target.closest("a.citation-chip");
+  if (!link) return;
+  const target = document.getElementById((link.getAttribute("href") || "").slice(1));
+  if (!target) return;
+  event.preventDefault();
+  if (target.tagName === "DETAILS") target.open = true;
+  let parent = target.parentElement;
+  while (parent) { if (parent.tagName === "DETAILS") parent.open = true; parent = parent.parentElement; }
+  target.scrollIntoView({ behavior: "smooth", block: "center" });
+});
 document.getElementById("deleteChatSession").addEventListener("click", () => deleteChatSession().catch(error => alert(error.message)));
 document.getElementById("toggleChatMemory").addEventListener("click", () => {
   const memoryNode = document.getElementById("chatMemory");
@@ -1609,7 +1659,7 @@ document.getElementById("addCase").addEventListener("click", async () => {
 });
 document.getElementById("cancelBatch").addEventListener("click", async () => {
   if (!activeBatchId) return;
-  await fetch(`/api/batch-experiments/${encodeURIComponent(activeBatchId)}/cancel`, { method: "POST" });
+  await apiFetch(`/api/batch-experiments/${encodeURIComponent(activeBatchId)}/cancel`, { method: "POST" });
   pollBatchExperiment(activeBatchId);
 });
 document.getElementById("askInput").addEventListener("keydown", e => {

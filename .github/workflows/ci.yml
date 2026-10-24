@@ -15,4 +15,8 @@ jobs:
       - run: pip install -r requirements-ci.txt
       - run: python -m compileall -q app server scripts training tests
       - run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: node --test tests/test_api_client.cjs
       - run: python training/train.py --dry-run

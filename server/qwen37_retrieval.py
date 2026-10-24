@@ -17,6 +17,7 @@ import re
 import shutil
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,8 @@ import numpy as np
 import requests
 from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
+from elasticsearch import NotFoundError
+from elastic_transport import ConnectionError as ESConnectionError, ConnectionTimeout
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -167,6 +170,7 @@ class Qwen37APIEmbedder:
         self.law_index = Qwen37FaissIndex(_resolve_path(os.getenv("QWEN37_LAW_INDEX_DIR", ""), law_default), "law")
         self.case_index = Qwen37FaissIndex(_resolve_path(os.getenv("QWEN37_CASE_INDEX_DIR", ""), cases_default), "case")
         self._local_bm25: LocalBM25Index | None = None
+        self._local_case_bm25: LocalBM25Index | None = None
         if self.law_index.dim != self.dimensions or self.case_index.dim != self.dimensions:
             raise RuntimeError(
                 "Qwen3.7 configured dimension does not match the offline index: "
@@ -182,7 +186,7 @@ class Qwen37APIEmbedder:
     @property
     def local_case_bm25(self) -> LocalBM25Index:
         """Build a separate lexical index for case chunks when ES is absent."""
-        if not hasattr(self, "_local_case_bm25") or self._local_case_bm25 is None:
+        if self._local_case_bm25 is None:
             self._local_case_bm25 = LocalBM25Index(self.case_index.metadata, corpus="case")
         return self._local_case_bm25
 
@@ -248,11 +252,14 @@ def retrieve(
 ) -> tuple[list[dict], list[dict]]:
     topk = int(os.getenv("BM25_TOPK", "10"))
     if es is not None:
-        bm25 = es.search(
-            index=os.getenv("ES_BM25_INDEX", "law_bm25_latest"),
-            size=topk,
-            query={"multi_match": {"query": query, "fields": ["title^1.5", "text"]}},
-        )["hits"]["hits"]
+        try:
+            bm25 = es.search(
+                index=os.getenv("ES_BM25_INDEX", "law_bm25_latest"),
+                size=topk,
+                query={"multi_match": {"query": query, "fields": ["title^1.5", "text"]}},
+            )["hits"]["hits"]
+        except (NotFoundError, ESConnectionError, ConnectionTimeout):
+            bm25 = model.local_bm25.search(query, topk)
     else:
         bm25 = model.local_bm25.search(query, topk)
     if not include_dense:
@@ -277,7 +284,7 @@ def retrieve_case_bm25(es: Elasticsearch | None, model: Qwen37APIEmbedder, query
                 size=topk,
                 query={"multi_match": {"query": query, "fields": ["title^1.5", "text"]}},
             )["hits"]["hits"]
-        except Exception:
+        except (NotFoundError, ESConnectionError, ConnectionTimeout):
             # A deployment may have Elasticsearch running before the case index
             # is built. Keep the demo usable and deterministic by falling back
             # to the aligned local case metadata rather than failing the whole
@@ -294,6 +301,47 @@ def retrieve_cases_hybrid(
     case_bm25 = retrieve_case_bm25(es, model, query)
     case_dense = retrieve_cases(model, query) if include_dense else []
     return case_bm25, case_dense
+
+
+def retrieve_evidence(
+    es: Elasticsearch | None, model: Qwen37APIEmbedder, query: str,
+    *, include_dense: bool = True, include_bm25: bool = True, include_cases: bool = True,
+) -> tuple[list[dict], list[dict], list[dict], list[dict], dict[str, float]]:
+    """Overlap lexical work with one shared query encoding; time each branch.
+
+    Timings overlap and must not be added to compute wall-clock retrieval time.
+    No embedding request or case lookup is submitted when its route is disabled.
+    """
+    timings: dict[str, float] = {}
+
+    def measured(name, function):
+        started = time.perf_counter()
+        value = function()
+        return value, time.perf_counter() - started
+
+    law_bm25, law_dense, case_bm25, case_dense = [], [], [], []
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        jobs = {}
+        if include_bm25:
+            jobs["law_bm25"] = pool.submit(measured, "law_bm25", lambda: retrieve(es, model, query, include_dense=False)[0])
+            if include_cases:
+                jobs["case_bm25"] = pool.submit(measured, "case_bm25", lambda: retrieve_case_bm25(es, model, query))
+        if include_dense:
+            jobs["query_embedding"] = pool.submit(measured, "query_embedding", lambda: model.encode(query, normalize_embeddings=True))
+        values = {}
+        for name, future in jobs.items():
+            values[name], elapsed = future.result()
+            timings[name] = round(elapsed, 4)
+    law_bm25 = values.get("law_bm25", [])
+    case_bm25 = values.get("case_bm25", [])
+    if include_dense:
+        vector = values["query_embedding"]
+        law_dense, elapsed = measured("law_dense", lambda: model.law_index.search(vector, int(os.getenv("QWEN37_LAW_TOPK", "10"))))
+        timings["law_dense"] = round(elapsed, 4)
+        if include_cases:
+            case_dense, elapsed = measured("case_dense", lambda: model.case_index.search(vector, int(os.getenv("QWEN37_CASE_TOPK", "8"))))
+            timings["case_dense"] = round(elapsed, 4)
+    return law_bm25, law_dense, case_bm25, case_dense, timings
 
 
 def rrf_candidates(

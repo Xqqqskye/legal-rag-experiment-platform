@@ -1132,13 +1132,13 @@ async function loadChatSessions() {
   // server restart or browser connection reset should not leave the composer
   // without an active session and make every later send fail with "Failed to
   // fetch". Retry only this idempotent GET; never retry message POSTs.
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
     try {
       response = await fetch("/api/chat/sessions?limit=30", { cache: "no-store" });
       break;
     } catch (error) {
       lastError = error;
-      if (attempt < 2) await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+      if (attempt < 5) await new Promise(resolve => setTimeout(resolve, 750 * (attempt + 1)));
     }
   }
   if (!response) throw lastError || new Error("无法连接到多轮对话服务");
@@ -1212,7 +1212,18 @@ function setMode(mode) {
     document.getElementById("chatMessages").innerHTML = `<div class="answer-warning">${escapeHtml(error.message || "无法连接到多轮对话服务")}</div>`;
     const list = document.getElementById("chatSessionList");
     list.innerHTML = `<div class="answer-warning">会话列表加载失败。请检查 127.0.0.1:8008 服务后重试。</div><button class="secondary-btn" id="retryChatSessions">重试</button>`;
-    document.getElementById("retryChatSessions").addEventListener("click", () => loadChatSessions().catch(() => {}));
+    document.getElementById("retryChatSessions").addEventListener("click", async () => {
+      const button = document.getElementById("retryChatSessions");
+      button.disabled = true;
+      button.textContent = "重试中…";
+      try {
+        await loadChatSessions();
+      } catch (retryError) {
+        document.getElementById("chatMessages").innerHTML = `<div class="answer-warning">${escapeHtml(retryError.message || "仍无法连接服务")}</div>`;
+        button.disabled = false;
+        button.textContent = "再次重试";
+      }
+    });
   });
   if (mode === "prompt") loadPromptCatalog().catch(error => { document.getElementById("promptSaveState").textContent = error.message; });
 }

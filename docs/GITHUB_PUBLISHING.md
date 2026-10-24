@@ -47,7 +47,7 @@ gitleaks detect --source . --redact
 
 推荐 Description：
 
-> 基于 FastAPI、BM25、Qwen3.7 Embedding、FAISS、RRF 和 LLM 重排的中文法律 RAG 工程平台，支持法条/案例混合检索、多轮结构化案件记忆、官方法源核验、引用闭环评测、Prompt/模型 A/B 测试及延迟成本分析。
+> 面向法律问答研发的中文 RAG 实验平台：支持单轮/多轮案件对话、法条与案例混合检索、BM25+向量+RRF、LLM 重排、证据引用、官方法源核验、批量评测和 Prompt/模型 A/B 实验。
 
 推荐 Topics：
 

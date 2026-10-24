@@ -16,6 +16,7 @@ import os
 import re
 import shutil
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -142,7 +143,10 @@ class Qwen37APIEmbedder:
         self.model = os.getenv("QWEN37_EMBEDDING_MODEL", "qwen3.7-text-embedding")
         self.dimensions = int(os.getenv("QWEN37_EMBEDDING_DIM", "1024"))
         self.batch_size = int(os.getenv("QWEN37_EMBEDDING_BATCH", "20"))
-        self.timeout = int(os.getenv("QWEN37_EMBEDDING_TIMEOUT", "120"))
+        self.connect_timeout = float(os.getenv("QWEN37_EMBEDDING_CONNECT_TIMEOUT", "5"))
+        self.read_timeout = float(os.getenv("QWEN37_EMBEDDING_READ_TIMEOUT", os.getenv("QWEN37_EMBEDDING_TIMEOUT", "30")))
+        self.max_retries = max(0, int(os.getenv("QWEN37_EMBEDDING_MAX_RETRIES", "1")))
+        self.trust_env = os.getenv("QWEN37_TRUST_ENV", "false").strip().lower() in {"1", "true", "yes"}
         self.verify_ssl = os.getenv("QWEN37_VERIFY_SSL", "false").strip().lower() in {"1", "true", "yes"}
         if not self.verify_ssl:
             requests.packages.urllib3.disable_warnings()  # type: ignore[attr-defined]
@@ -151,6 +155,11 @@ class Qwen37APIEmbedder:
             raise RuntimeError("DASHSCOPE_API_KEY is missing; Qwen3.7 query encoding cannot start")
         base_url = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1").rstrip("/")
         self.endpoint = f"{base_url}/embeddings"
+        self.http = requests.Session()
+        # The workstation's inherited proxy/network settings caused requests to
+        # hang while curl and a direct session completed normally. Direct access
+        # is the safe default; set QWEN37_TRUST_ENV=true on proxy-only hosts.
+        self.http.trust_env = self.trust_env
         self.cache: dict[str, np.ndarray] = {}
         law_default = WORKSPACE_ROOT / "data" / "indexes" / "law_qwen37_api_latest"
         cases_default = WORKSPACE_ROOT / "data" / "indexes" / "cases_qwen37_api_latest"
@@ -170,14 +179,27 @@ class Qwen37APIEmbedder:
         return self._local_bm25
 
     def _embed_batch(self, texts: list[str]) -> np.ndarray:
-        response = requests.post(
-            self.endpoint,
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            json={"model": self.model, "input": texts, "dimensions": self.dimensions},
-            timeout=self.timeout,
-            verify=self.verify_ssl,
-        )
-        response.raise_for_status()
+        last_error: Exception | None = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = self.http.post(
+                    self.endpoint,
+                    headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                    json={"model": self.model, "input": texts, "dimensions": self.dimensions},
+                    timeout=(self.connect_timeout, self.read_timeout),
+                    verify=self.verify_ssl,
+                )
+                response.raise_for_status()
+                break
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                last_error = exc
+                if attempt >= self.max_retries:
+                    raise RuntimeError(
+                        f"Qwen3.7 embedding request failed after {attempt + 1} attempt(s): {exc}"
+                    ) from exc
+                time.sleep(0.25 * (attempt + 1))
+        else:  # pragma: no cover - the loop either breaks or raises above
+            raise RuntimeError(f"Qwen3.7 embedding request failed: {last_error}")
         payload = response.json()
         rows = sorted(payload.get("data") or [], key=lambda item: int(item.get("index", 0)))
         if len(rows) != len(texts):

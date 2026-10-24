@@ -11,6 +11,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 from elasticsearch import Elasticsearch
+import httpx
 from openai import OpenAI
 
 from server.qwen37_retrieval import Qwen37APIEmbedder, retrieve, retrieve_cases, rrf_candidates
@@ -74,19 +75,35 @@ issues（最多8项，每项含 severity、type、detail、suggestion）、unsup
 }
 
 
+def _llm_http_client() -> httpx.Client:
+    """Create a direct HTTP client for OpenAI-compatible providers.
+
+    httpx may inherit a workstation proxy route that stalls DashScope requests.
+    Direct access is the default for this local demo; proxy-only environments can
+    opt in with LLM_TRUST_ENV=true (or DASHSCOPE_TRUST_ENV=true).
+    """
+    trust_env = os.getenv("LLM_TRUST_ENV", os.getenv("DASHSCOPE_TRUST_ENV", "false")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    verify_ssl = os.getenv("LLM_VERIFY_SSL", "true").strip().lower() not in {"0", "false", "no"}
+    return httpx.Client(trust_env=trust_env, verify=verify_ssl, timeout=60.0)
+
+
 def llm_client() -> tuple[OpenAI, str, str]:
     provider = os.getenv("LLM_PROVIDER", "dashscope").strip().lower()
     if provider == "openai":
         key = os.getenv("OPENAI_API_KEY", "").strip()
         if not key:
             raise RuntimeError("OPENAI_API_KEY is missing in .env")
-        return OpenAI(api_key=key, timeout=60.0), os.getenv("OPENAI_MODEL", "gpt-4.1-mini"), provider
+        return OpenAI(api_key=key, timeout=60.0, http_client=_llm_http_client()), os.getenv("OPENAI_MODEL", "gpt-4.1-mini"), provider
 
     key = os.getenv("DASHSCOPE_API_KEY", "").strip()
     if not key:
         raise RuntimeError("DASHSCOPE_API_KEY is missing in .env")
     base_url = os.getenv("DASHSCOPE_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-    return OpenAI(api_key=key, base_url=base_url, timeout=60.0), os.getenv("DASHSCOPE_MODEL", "qwen-plus"), provider
+    return OpenAI(api_key=key, base_url=base_url, timeout=60.0, http_client=_llm_http_client()), os.getenv("DASHSCOPE_MODEL", "qwen-plus"), provider
 
 
 def parse_json(text: str) -> dict:

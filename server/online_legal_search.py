@@ -34,6 +34,14 @@ _FULL_LAW_NAME_RE = re.compile(r"(中华人民共和国[\u4e00-\u9fff]{1,30}?(?:
 VALIDITY_LABELS = {1: "已废止", 2: "已修改", 3: "现行有效", 4: "尚未生效"}
 
 
+def _httpx_trust_env() -> bool:
+    return os.getenv("LLM_TRUST_ENV", os.getenv("DASHSCOPE_TRUST_ENV", "false")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+
+
 def is_official_legal_url(url: str) -> bool:
     """Return True only for HTTP(S) URLs hosted by gov.cn or a subdomain."""
 
@@ -91,7 +99,7 @@ def _official_database_lookup(law_name: str, timeout_seconds: float) -> dict[str
         "pageNum": 1,
         "pageSize": 20,
     }
-    with httpx.Client(timeout=timeout_seconds) as client:
+    with httpx.Client(timeout=timeout_seconds, trust_env=_httpx_trust_env()) as client:
         response = client.post(search_url, json=payload)
         response.raise_for_status()
         result = response.json()
@@ -281,7 +289,12 @@ def verify_official_source(source: dict[str, Any], timeout_seconds: float) -> di
         "Accept": "text/html,application/xhtml+xml,application/pdf,text/plain;q=0.9,*/*;q=0.5",
     }
     try:
-        with httpx.Client(timeout=timeout_seconds, follow_redirects=False, headers=headers) as client:
+        with httpx.Client(
+            timeout=timeout_seconds,
+            follow_redirects=False,
+            headers=headers,
+            trust_env=_httpx_trust_env(),
+        ) as client:
             for _ in range(MAX_REDIRECTS + 1):
                 if not is_official_legal_url(current_url):
                     result["verification_status"] = "rejected_domain"
@@ -435,7 +448,7 @@ def search_official_legal_sources(
                 },
             },
         }
-        with httpx.Client(timeout=request_timeout) as http_client:
+        with httpx.Client(timeout=request_timeout, trust_env=_httpx_trust_env()) as http_client:
             response = http_client.post(
                 api_url,
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},

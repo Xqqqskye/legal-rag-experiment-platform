@@ -161,19 +161,6 @@ RERANK_TOPK_FINAL=5
 
 这里的含义是法条 BM25 召回 10 条、案例 BM25 召回 10 条、Qwen3.7 法条向量召回 10 条、案例向量召回 8 条；RRF 按 `chunk_id` 去重后排序；LLM 最终选出不超过 5 条证据。法条和案例使用各自的 BM25 语料域；Dense 查询和离线索引必须使用同一套 Qwen3.7 Embedding，不与 BGE 或 Qwen3-Embedding-8B 向量混用。
 
-## 历史检索实验快照
-
-`artifacts/retrieval_metrics.json` 保存的是原项目已有评测文件的汇总，并非当前 5 条公开样例，也不是本次 GitHub 整理过程中重新跑出的结果：
-
-| 方案 | Top K | Context Recall | Context Precision |
-|---|---:|---:|---:|
-| BM25 | 10 | 0.4204 | 0.4181 |
-| BGE-large | 10 | 0.5613 | 0.7226 |
-| RRF | 20 | **0.6667** | 0.5516 |
-| RRF + BGE reranker-large | 10 | 0.6042 | **0.7593** |
-
-这些结果支持“Dense 在该历史评测集上优于 BM25；RRF 提高候选覆盖；reranker 提高最终精度”的局部结论，不能直接外推为所有法律问题或当前线上配置的效果。
-
 ## 训练代码状态
 
 `training/` 提供 QLoRA 配置、数据清洗和启动脚本，便于复现实验设计；公开仓库没有训练后的 Adapter、checkpoint 或真实训练日志，也不声称当前 API 模型经过本项目 LoRA。Demo 当前使用供应商 API 模型完成分析、重排、生成和评估。
